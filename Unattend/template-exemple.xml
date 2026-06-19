@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Template unattend.xml personnalisable PSWinDeploy
+     Les variables {{CLE}} sont substituees a la generation.
+     Copiez-le en template.xml et adaptez-le a vos besoins. -->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+    <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{{ARCH}}"
+                   publicKeyToken="31bf3856ad364e35" language="neutral"
+                   versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+            <ComputerName>{{COMPUTERNAME}}</ComputerName>
+            <TimeZone>{{TIMEZONE}}</TimeZone>
+            <!-- Personnalisez ici : organisation, proprietaire... -->
+            <RegisteredOrganization>Mon Entreprise</RegisteredOrganization>
+            <RegisteredOwner>Service IT</RegisteredOwner>
+        </component>
+    </settings>
+
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="{{ARCH}}"
+                   publicKeyToken="31bf3856ad364e35" language="neutral"
+                   versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+            <InputLocale>{{INPUTLOCALE}}</InputLocale>
+            <SystemLocale>{{UILANGUAGE}}</SystemLocale>
+            <UILanguage>{{UILANGUAGE}}</UILanguage>
+            <UserLocale>{{UILANGUAGE}}</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="{{ARCH}}"
+                   publicKeyToken="31bf3856ad364e35" language="neutral"
+                   versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <SkipUserOOBE>true</SkipUserOOBE>
+            </OOBE>
+            <UserAccounts>
+                <AdministratorPassword>
+                    <Value>{{ADMINPASSWORD}}</Value>
+                    <PlainText>true</PlainText>
+                </AdministratorPassword>
+            </UserAccounts>
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <CommandLine>{{PHASE2CMD}}</CommandLine>
+                    <Description>PSWinDeploy phase 2</Description>
+                    <RequiresUserInput>false</RequiresUserInput>
+                </SynchronousCommand>
+            </FirstLogonCommands>
+        </component>
+    </settings>
+
+</unattend>

@@ -1,0 +1,68 @@
+# ============================================================================
+# Overrides\gui.ps1 -- EXEMPLE de surcharge graphique PSWinDeploy (WinForms)
+# ----------------------------------------------------------------------------
+# Pour activer : renommer ce fichier en 'gui.ps1' et le deposer dans
+#   \\serveur\Deploy\Overrides\gui.ps1
+# Il sera charge automatiquement au demarrage du deploiement.
+# Voir Docs\GUIDE-SURCHARGE-GUI.md pour le detail.
+# ============================================================================
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+Set-PSWDUIProvider -Provider @{
+
+    AskYesNo = {
+        param($Question, $Default)
+        $r = [System.Windows.Forms.MessageBox]::Show($Question, 'PSWinDeploy', 'YesNo', 'Question')
+        return ($r -eq 'Yes')
+    }
+
+    ShowList = {
+        param($Title, $Items)
+        $f = New-Object System.Windows.Forms.Form
+        $f.Text = $Title; $f.Size = New-Object System.Drawing.Size(460,400)
+        $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+        $lb = New-Object System.Windows.Forms.ListBox
+        $lb.Location = New-Object System.Drawing.Point(12,12)
+        $lb.Size = New-Object System.Drawing.Size(420,300)
+        foreach ($it in $Items) { [void]$lb.Items.Add($it) }
+        if ($lb.Items.Count -gt 0) { $lb.SelectedIndex = 0 }
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = 'Choisir'; $b.Location = New-Object System.Drawing.Point(340,325)
+        $b.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $f.Controls.AddRange(@($lb,$b)); $f.AcceptButton = $b
+        [void]$f.ShowDialog()
+        return [int]$lb.SelectedIndex
+    }
+
+    ShowMultiList = {
+        param($Title, $Items)
+        $f = New-Object System.Windows.Forms.Form
+        $f.Text = $Title; $f.Size = New-Object System.Drawing.Size(460,440)
+        $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+        $clb = New-Object System.Windows.Forms.CheckedListBox
+        $clb.Location = New-Object System.Drawing.Point(12,12)
+        $clb.Size = New-Object System.Drawing.Size(420,340)
+        $clb.CheckOnClick = $true
+        foreach ($it in $Items) { [void]$clb.Items.Add($it) }
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = 'Valider'; $b.Location = New-Object System.Drawing.Point(340,365)
+        $b.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $f.Controls.AddRange(@($clb,$b)); $f.AcceptButton = $b
+        [void]$f.ShowDialog()
+        $picked = @(); foreach ($i in $clb.CheckedIndices) { $picked += [int]$i }
+        return $picked
+    }
+}
+
+# Exemple d'override de fonction nommee (selecteur d'OS en WinPE) :
+# Set-PSWDOverride -Name 'Select-OSImage' -ScriptBlock {
+#     param($ImageShare)
+#     $wims = Get-ChildItem $ImageShare -Filter '*.wim' -EA SilentlyContinue
+#     if (-not $wims) { return $null }
+#     $idx = Show-PSWDList -Title 'Choisir le systeme' -Items ($wims | ForEach-Object { $_.Name })
+#     return $wims[$idx].FullName
+# }
+
+Write-PSWDNotify "Surcharge GUI (exemple) chargee." 'OK'
