@@ -120,6 +120,25 @@ Le step `JoinDomain` est fonctionnel. Il gere :
 }
 ```
 
+### IMPORTANT : la jonction est un STEP de la sequence du poste
+
+La jonction au domaine se met comme PREMIER step dans la sequence affectee au
+poste (by-name / by-mac / _default). Il n'y a PAS de sequence de jonction
+separee : tout est dans un seul fichier, ce qui evite les conflits et reste
+previsible.
+
+Si vous demandez la jonction dans l'assistant de deploiement (phase 1), le
+systeme vous rappelle simplement d'ajouter ce step ; il ne genere plus de
+sequence cachee.
+
+Flux type d'une sequence avec jonction :
+1. JoinDomain (RebootAfter='Always')  -> jonction + reboot + reprise
+2. InstallUpdates                      -> MAJ (plusieurs passes)
+3. InstallApps                         -> applications
+4. Cleanup                             -> nettoyage final
+
+Voir l'exemple Sequences\EXEMPLE-poste-domaine.psd1.exemple.
+
 ### Configuration globale recommandee (a ajouter dans PSWinDeploy.psd1)
 
 Pour ne pas repeter l'OU et le domaine dans chaque sequence, on peut les
@@ -142,3 +161,80 @@ le **vault** (`secrets.vault.psd1`), jamais en clair dans le psd1.
 Brancher le step JoinDomain pour qu'il lise `DomainName` / `DomainOU` depuis
 la config globale si les params du step sont vides. Actuellement il faut les
 indiquer dans le step.
+
+---
+
+## 4. Gestion robuste de l'autologon et de la reprise
+
+La phase 2 enchaine des etapes avec reboots (MAJ, jonction, apps). Le systeme
+garantit la reprise apres chaque reboot, de maniere centralisee et recuperable.
+
+### Autologon centralise (armer au debut, desarmer a la fin)
+
+- Au DEBUT de la sequence (phase 2), l'autologon et la tache de reprise sont
+  armes UNE fois (Enable-DeployResume). L'autologon utilise le compte admin
+  local (detecte par son SID -500, donc 'Administrateur' en FR) et le mot de
+  passe localAdminPassword du vault.
+- A CHAQUE reboot, l'autologon est re-arme (AutoLogonCount=1 se consomme).
+- A la FIN de la sequence (ou step Cleanup), tout est desarme : autologon OFF,
+  mot de passe retire du registre, tache supprimee.
+
+C'est centralise : un seul point d'armement, un seul de desarmement. Pas de
+fuite si un step oublie de nettoyer.
+
+### Double mecanisme de reprise
+
+1. AUTOLOGON + RunOnce : ouvre une session interactive et lance Start-Deploy
+   -Resume dans une FENETRE POWERSHELL VISIBLE (on voit le deroulement).
+2. Tache planifiee SYSTEM (PSWinDeployResume) : filet de securite si l'autologon
+   echoue (ex: compte admin desactive). Tourne sans session (pas de fenetre).
+
+### Marqueur de step en cours (diagnostic)
+
+Avant CHAQUE step, un marqueur C:\Deploy\Logs\.current-step est ecrit avec :
+le nom du step, son type, l'heure de debut, la machine. 
+- Si un reboot suit (prevu) : le marqueur reste, et a la reprise on affiche
+  "Reprise pendant un step : <nom>".
+- Si le step plante : le marqueur indique exactement quel step etait actif au
+  moment du probleme. Tres utile pour le diagnostic.
+- Si le step finit sans reboot : le marqueur est retire.
+
+A la reprise, si un marqueur est present, le systeme affiche le step concerne
+avant de continuer.
+
+### Script de secours Reset-PSWinDeploy.ps1
+
+Au debut du deploiement, un script de secours est depose a deux endroits :
+- C:\Deploy\Reset-PSWinDeploy.ps1
+- Sur le Bureau public (visible immediatement)
+
+Si le deploiement reboucle ou se bloque, lancez ce script (en administrateur) :
+il desarme l'autologon, supprime la tache de reprise, et rappelle comment
+relancer l'assistant. Il est supprime automatiquement quand la sequence se
+termine normalement.
+
+Pour relancer l'assistant a tout moment (depuis la machine ou le partage) :
+```
+C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard
+```
+
+### Garde-fou ESC a chaque reprise
+
+A chaque reprise apres reboot, une fenetre de 5 secondes s'affiche :
+```
+Reprise du deploiement dans 5s...
+[ESC] = interrompre et desactiver l'autologon / [Entree] = continuer maintenant
+```
+- ESC : interrompt, desarme l'autologon, propose de lancer l'assistant.
+- Entree : continue tout de suite.
+- Rien : continue apres 5 secondes.
+
+Cela permet de reprendre la main a chaque reboot sans script externe, par
+exemple si on voit que quelque chose ne va pas.
+
+### En resume : que faire si ca bloque
+
+1. Au prochain reboot, appuyer sur ESC dans la fenetre de reprise (5s).
+2. OU lancer Reset-PSWinDeploy.ps1 depuis le Bureau (en administrateur).
+3. Consulter C:\Deploy\Logs\.current-step pour savoir quel step posait probleme.
+4. Consulter les logs dans C:\Deploy\Logs et sur le partage \\serveur\Logs.

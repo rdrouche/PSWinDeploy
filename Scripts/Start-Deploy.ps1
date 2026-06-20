@@ -333,32 +333,12 @@ function Invoke-ScratchWizard {
     }
 
     # ?? 3. DOMAINE ????????????????????????????????????????????????????????????
-    Write-Host ""; Write-Step "Etape 3/5 -- Domaine"
-    # Valeurs par defaut depuis PSWinDeploy.psd1 (DomainName / DomainOU)
-    $cfgDomain = Get-Cfg 'DomainName'
-    $cfgOU     = Get-Cfg 'DomainOU'
-    if ($cfgDomain) {
-        Write-Host "  [i]  Domaine configure : $cfgDomain" -ForegroundColor DarkGray
-        if ($cfgOU) { Write-Host "  [i]  OU configuree : $cfgOU" -ForegroundColor DarkGray }
-    }
-    Write-Host "  [?]  Joindre un domaine AD ? [o/N] : " -ForegroundColor Yellow -NoNewline
-    $joinDomain = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
+    # La jonction au domaine NE se demande PLUS ici (phase 1). Elle se fait en
+    # phase 2 via un step JoinDomain dans la sequence du poste, ou via l'assistant
+    # interactif (option "Construire a la volee"). Plus simple et coherent.
+    $joinDomain = $false
     $domainName = ''
     $domainOU   = ''
-    if ($joinDomain) {
-        # Pre-remplir avec la config : Entree = valider la valeur par defaut.
-        $dnDefault = if ($cfgDomain) { " [$cfgDomain]" } else { '' }
-        Write-Host "  [?]  Domaine (ex: corp.local)$dnDefault : " -ForegroundColor Yellow -NoNewline
-        $domainName = (Read-Host).Trim()
-        if (-not $domainName -and $cfgDomain) { $domainName = $cfgDomain }
-        $ouDefault = if ($cfgOU) { " [$cfgOU]" } else { ' (vide=defaut)' }
-        Write-Host "  [?]  OU cible$ouDefault : " -ForegroundColor Yellow -NoNewline
-        $domainOU = (Read-Host).Trim()
-        if (-not $domainOU -and $cfgOU) { $domainOU = $cfgOU }
-        Write-OK "Domaine : $domainName$(if($domainOU){" (OU: $domainOU)"})"
-    } else {
-        Write-OK "Standalone"
-    }
 
     # ?? 4. CONFIG ?????????????????????????????????????????????????????????????
     Write-Host ""; Write-Step "Etape 4/5 -- Configuration"
@@ -657,12 +637,13 @@ function Invoke-ScratchWizard {
                 if ($advNoPhase2) {
                     $uParams.FirstLogonCommand = 'cmd /c echo PHASE2-DESACTIVEE > C:\phase2-skipped.txt'
                 } else {
-                    # Rediriger TOUTE la sortie (succes + erreurs) vers un log des le
-                    # lancement : le FirstLogonCommand tourne SANS fenetre visible
-                    # pendant l'OOBE, donc un plantage precoce serait invisible.
-                    # Avec la redirection, on capture meme une erreur de demarrage.
-                    # On passe par cmd pour creer le dossier Logs puis lancer + rediriger.
-                    $uParams.FirstLogonCommand = 'cmd /c "mkdir C:\Deploy\Logs 2>nul & powershell -NoProfile -ExecutionPolicy Bypass -File C:\Deploy\Scripts\Start-Deploy.ps1 -Resume > C:\Deploy\Logs\phase2-boot.log 2>&1"'
+                    # Lancer la phase 2 dans une FENETRE POWERSHELL VISIBLE (pas un
+                    # cmd noir muet) : l'operateur voit le deroulement. On cree le
+                    # dossier Logs, on demarre une transcription (pour garder une
+                    # trace meme si la fenetre se ferme), puis on lance la reprise.
+                    # 'start' detache une vraie fenetre powershell de la session OOBE.
+                    $p2Cmd = 'mkdir C:\Deploy\Logs 2>nul & start "" powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "Start-Transcript -Path C:\Deploy\Logs\phase2-boot.log -Append; & C:\Deploy\Scripts\Start-Deploy.ps1 -Resume"'
+                    $uParams.FirstLogonCommand = "cmd /c `"$p2Cmd`""
                 }
             }
             # Jonction domaine : faite par sequence JoinDomain en phase 2 (pas unattend).
@@ -673,50 +654,15 @@ function Invoke-ScratchWizard {
         # ou _default.psd1 sur le partage, OU via l'assistant interactif. On ne
         # choisit plus rien en WinPE : pas de menu, pas de recherche ici.
         $phase2Seq = ''
-        # Si la jonction au domaine est demandee, generer une SEQUENCE locale avec
-        # un step JoinDomain. Plus fiable que l'unattend : la jonction se fait apres
-        # le boot (reseau pret), avec reboot + reprise geres par le moteur. Cette
-        # sequence locale est PRIORITAIRE en phase 2 (avant by-name/_default).
+        # La jonction au domaine est un STEP 'JoinDomain' a placer dans la sequence
+        # du poste (by-name / by-mac / _default), PAS une sequence separee generee
+        # ici. C'est plus simple et coherent : un seul fichier, un seul flux.
         if ($joinDomain -and $domainName) {
-            try {
-                $rtDir = Join-Path (Split-Path $modulesDir -Parent) 'Runtime'
-                if (-not (Test-Path $rtDir -EA SilentlyContinue)) { New-Item -ItemType Directory $rtDir -Force | Out-Null }
-                $joinSeqPath = Join-Path $rtDir 'sequence.psd1'
-                $sq = [char]39   # guillemet simple, pour eviter l'imbrication de quotes
-                $dnEsc2 = $domainName.Replace("$sq", "$sq$sq")
-                $ouLine = ''
-                if ($domainOU) {
-                    $ouEsc2 = $domainOU.Replace("$sq", "$sq$sq")
-                    $ouLine = "ou = $sq$ouEsc2$sq"
-                }
-                $seqContent = @(
-                    '@{'
-                    "    Id    = 'jonction-domaine'"
-                    "    Name  = 'Jonction au domaine $dnEsc2'"
-                    '    Steps = @('
-                    '        @{'
-                    "            Id = 'join'; Type = 'JoinDomain'; Name = 'Jonction au domaine'; Phase = 'Windows'"
-                    '            Enabled = $true; RebootAfter = ''Always'''
-                    "            Params = @{ domain = $sq$dnEsc2$sq; $ouLine }"
-                    '        }'
-                    '        @{'
-                    "            Id = 'wizard'; Type = 'ShowWizard'; Name = 'Assistant post-installation'; Phase = 'Windows'"
-                    '            Enabled = $true; RebootAfter = ''Never'''
-                    '        }'
-                    '    )'
-                    '}'
-                )
-                $enc = New-Object System.Text.UTF8Encoding($true)
-                [System.IO.File]::WriteAllText($joinSeqPath, ($seqContent -join "`r`n"), $enc)
-                $phase2Seq = $joinSeqPath
-                Write-OK "Sequence de jonction domaine generee : jonction + reboot + assistant"
-            } catch {
-                Write-Warn "Generation sequence jonction echouee : $_"
-            }
+            Write-Info "Jonction domaine demandee : ajoutez un step 'JoinDomain' en 1er"
+            Write-Info "dans votre sequence (by-name/by-mac/_default). Le domaine/OU sont"
+            Write-Info "lus depuis PSWinDeploy.psd1 (DomainName/DomainOU)."
         }
-        if (-not $phase2Seq) {
-            Write-Info "Sequence de phase 2 : sera resolue apres le reboot (par nom / MAC / _default / assistant)."
-        }
+        Write-Info "Sequence de phase 2 : resolue apres le reboot (par nom / MAC / _default / assistant)."
 
         # Config pour la phase 2 : on transmet le serveur + l'IP. Les chemins
         # detailles viennent de PSWinDeploy.psd1 (copie sur la cible).
@@ -893,61 +839,22 @@ function Select-SequenceFile {
     Write-Host "  |             SELECTION DU DEPLOIEMENT                     |" -ForegroundColor Cyan
     Write-Host "  +----------------------------------------------------------+" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  [S] From Scratch  -- Assistant interactif (comme MDT)" -ForegroundColor Yellow
-    Write-Host "       Choisir OS, domaine, apps, disque pas a pas" -ForegroundColor DarkGray
+    Write-Host "  [S] Deploiement  -- Assistant interactif (OS, disque, domaine)" -ForegroundColor Yellow
+    Write-Host "       La post-installation (apps, MAJ, scripts) se fait en phase 2" -ForegroundColor DarkGray
+    Write-Host "       via les sequences (by-name / by-mac / _default) ou l'assistant." -ForegroundColor DarkGray
     Write-Host ""
-
-    if (@($sequences).Count -gt 0) {
-        Write-Host "  -- Sequences / Profils preconfigures --" -ForegroundColor Cyan
-        Write-Host ""
-        for ($i=0; $i -lt @($sequences).Count; $i++) {
-            $seq = $sequences[$i]
-            $seqName = $seq.BaseName
-            $seqDesc = ''
-            if ($seq.Extension -eq '.psd1') {
-                try {
-                    $d = Import-PowerShellDataFile $seq.FullName -EA SilentlyContinue
-                    if ($d -and $d.Name) { $seqName = $d.Name }
-                    if ($d -and $d.Description) { $seqDesc = $d.Description }
-                    elseif ($d -and $d.Metadata -and $d.Metadata.OS) { $seqDesc = $d.Metadata.OS }
-                } catch {}
-            }
-            Write-Host "  [$($i+1)] $seqName" -ForegroundColor White
-            if ($seqDesc) { Write-Host "       $seqDesc" -ForegroundColor Gray }
-            Write-Host ""
-        }
-    } else {
-        Write-Info "Aucune sequence sur le partage -- utiliser [S] From Scratch"
-        Write-Info "ou creer une sequence via PSWinDeploy-Console.ps1 [D] sur le serveur"
-        Write-Host ""
-    }
-
-    Write-Host "  [0] Saisir le chemin manuellement" -ForegroundColor DarkGray
     Write-Host "  [C] Ligne de commande (shell PowerShell, partages montes)" -ForegroundColor DarkGray
     Write-Host "      Pour diagnostic, tests manuels, ou outils en ligne de commande" -ForegroundColor DarkGray
     Write-Host ""
 
-    # ?? SAISIE ????????????????????????????????????????????????????????????????
-    $maxChoice = @($sequences).Count
+    # En mode SIMPLE, la phase 1 ne deroule PAS de sequence (les sequences sont
+    # de la phase 2). On ne propose donc que l'assistant de deploiement [S] ou
+    # le shell [C]. Le choix de sequence a ete retire (n'avait plus de sens ici).
     while ($true) {
-        Write-Host "  Choix [S=Scratch / 1-$maxChoice / 0=Manuel / C=Commande] : " -ForegroundColor Yellow -NoNewline
+        Write-Host "  Choix [S=Deploiement / C=Commande] : " -ForegroundColor Yellow -NoNewline
         $sel = (Read-Host).Trim().ToUpper()
-
-        if ($sel -eq 'S') { return 'SCRATCH' }
+        if ($sel -eq 'S' -or $sel -eq '') { return 'SCRATCH' }
         if ($sel -eq 'C') { return 'SHELL' }
-
-        if ($sel -eq '0') {
-            Write-Host "  Chemin complet vers la sequence : " -ForegroundColor White -NoNewline
-            $p = (Read-Host).Trim().Trim('"').Trim("'").Trim()
-            if (Test-Path $p -ErrorAction SilentlyContinue) { return $p }
-            Write-Warn "Fichier introuvable : $p"
-            continue
-        }
-
-        if ($sel -match '^\d+$' -and [int]$sel -ge 1 -and [int]$sel -le $maxChoice) {
-            return $sequences[[int]$sel - 1].FullName
-        }
-
         Write-Warn "Choix invalide"
     }
 }
@@ -1114,6 +1021,52 @@ try {
         Write-Step "Phase 2 : post-deploiement (Windows demarre)"
         Write-Host ""
 
+        # Detecter un MARQUEUR de step en cours : s'il existe, c'est qu'on a
+        # redemarre PENDANT un step (reboot prevu, ou plantage). On l'affiche
+        # pour savoir d'ou on repart / ce qui a pu planter.
+        $markerFile = 'C:\Deploy\Logs\.current-step'
+        if (Test-Path $markerFile -EA SilentlyContinue) {
+            try {
+                $mk = Get-Content $markerFile -Raw -EA SilentlyContinue
+                $mkName = ($mk -split "`n" | Where-Object { $_ -match '^stepName=' }) -replace 'stepName=',''
+                Write-Warn "Reprise pendant un step : $($mkName.Trim())"
+                Write-Info "(Si ce step a plante, consultez C:\Deploy\Logs. Le deploiement reprend.)"
+            } catch {}
+        }
+
+        # GARDE-FOU : fenetre de 5s pour reprendre la main. ESC = interrompre et
+        # desarmer l'autologon (utile si le deploiement reboucle ou se bloque).
+        Write-Host "  Reprise du deploiement dans 5s..." -ForegroundColor Cyan
+        Write-Host "  [ESC] = interrompre et desactiver l'autologon / [Entree] = continuer maintenant" -ForegroundColor DarkGray
+        $escPressed = $false
+        $deadline = (Get-Date).AddSeconds(5)
+        while ((Get-Date) -lt $deadline) {
+            if ([Console]::KeyAvailable) {
+                $k = [Console]::ReadKey($true)
+                if ($k.Key -eq 'Escape') { $escPressed = $true; break }
+                if ($k.Key -eq 'Enter')  { break }
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        if ($escPressed) {
+            Write-Warn "Reprise interrompue par l'operateur."
+            try { if (Get-Command Disable-DeployResume -EA SilentlyContinue) { Disable-DeployResume } } catch {}
+            Write-Host ""
+            Write-OK "Autologon et reprise desactives."
+            Write-Info "Pour relancer l'assistant : C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard"
+            Write-Host ""
+            $relance = Read-Host "  Lancer l'assistant maintenant ? (O/n)"
+            if ($relance -notmatch '^[nN]') {
+                $PostInstallWizard = $true; $Resume = $false
+            } else {
+                Read-Host "  Appuyez sur Entree pour fermer"
+                return
+            }
+        }
+    }
+
+    if ($Resume) {
+
         # Config singleton deja chargee + chemins resolus. On LIT le partage Deploy.
         $NetworkShare = Get-Cfg 'DeployShare'
         if (-not $NetworkShare) { $NetworkShare = Get-Cfg 'NetworkShare' }
@@ -1198,9 +1151,16 @@ try {
             Invoke-TaskSequence -SequencePath $SequencePath -Resume -PhaseFilter 'Windows'
         }
 
-        # Nettoyer le RunOnce/autologon de reprise pour ne pas reboucler
+        # Nettoyer les mecanismes de reprise (sequence finie -> ne pas reboucler) :
+        # RunOnce, autologon, et tache planifiee.
         try {
-            reg delete 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' /v 'PSWinDeploy-Resume' /f 2>&1 | Out-Null
+            reg delete 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' /v 'PSWinDeployResume' /f 2>&1 | Out-Null
+            # Desarmer l'autologon
+            $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+            Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue
+            Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue
+            # Supprimer la tache de reprise
+            & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null
         } catch {}
 
         Write-Host ""

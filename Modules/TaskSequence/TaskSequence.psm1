@@ -521,6 +521,141 @@ function Copy-DeployToTarget {
     }
 }
 
+function Get-LocalAdminName {
+    <#
+    .SYNOPSIS Retourne le nom REEL du compte administrateur local (SID -500).
+    .DESCRIPTION
+        Le compte admin integre s'appelle 'Administrator' (EN), 'Administrateur'
+        (FR), 'Administrador' (ES)... Son SID se termine TOUJOURS par '-500'.
+        On resout le nom via le SID pour etre independant de la langue de l'OS.
+        Repli : 'Administrator' si la detection echoue.
+    #>
+    try {
+        $admin = Get-CimInstance Win32_UserAccount -Filter "LocalAccount=True" -EA Stop |
+            Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
+        if ($admin -and $admin.Name) { return $admin.Name }
+    } catch {}
+    # Repli WMI classique
+    try {
+        $admin = Get-WmiObject Win32_UserAccount -Filter "LocalAccount=True" -EA Stop |
+            Where-Object { $_.SID -like 'S-1-5-21-*-500' } | Select-Object -First 1
+        if ($admin -and $admin.Name) { return $admin.Name }
+    } catch {}
+    return 'Administrator'
+}
+
+function Enable-DeployResume {
+    <#
+    .SYNOPSIS Arme la reprise (autologon + tache) pour le deploiement en cours.
+        Centralise : appele UNE fois au debut de la sequence (phase 2), re-arme
+        a chaque reboot. Ecrit aussi un script de secours Reset-PSWinDeploy.ps1.
+    #>
+    if (Test-IsWinPE) { return }
+    try {
+        $adminPwd = $null
+        try { $adminPwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch {}
+        if ($adminPwd) {
+            Set-DeployAutologon -Username (Get-LocalAdminName) -Password $adminPwd | Out-Null
+        } else {
+            Write-TSLog "localAdminPassword absent du vault -- autologon non arme (reprise par tache SYSTEM seulement)." -Level WARN
+        }
+        Set-DeployResumeTask | Out-Null
+        Write-DeployResetScript   # filet de securite (script de desarmement)
+    } catch { Write-TSLog "Enable-DeployResume : $_" -Level WARN }
+}
+
+function Write-DeployResetScript {
+    <#
+    .SYNOPSIS Depose un script de secours Reset-PSWinDeploy.ps1 (sur le disque
+        ET sur le Bureau public) qui desarme l'autologon et la reprise. A lancer
+        manuellement si le deploiement reboucle ou se bloque.
+    #>
+    if (Test-IsWinPE) { return }
+    $script = @'
+# Reset-PSWinDeploy.ps1 -- desarme l'autologon et la reprise PSWinDeploy.
+# A lancer en tant qu'administrateur si le deploiement reboucle ou se bloque.
+Write-Host "Desarmement de l'autologon et de la reprise PSWinDeploy..." -ForegroundColor Yellow
+$wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+try { Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue } catch {}
+try { Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue } catch {}
+$ro = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+try { Remove-ItemProperty $ro -Name 'PSWinDeployResume' -Force -EA SilentlyContinue } catch {}
+try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
+try { schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+Write-Host "Termine. L'autologon et la reprise sont desactives." -ForegroundColor Green
+Write-Host "Pour relancer l'assistant : C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard" -ForegroundColor Cyan
+Read-Host "Appuyez sur Entree pour fermer"
+'@
+    foreach ($dest in @('C:\Deploy\Reset-PSWinDeploy.ps1', "$env:PUBLIC\Desktop\Reset-PSWinDeploy.ps1")) {
+        try {
+            $dir = Split-Path $dest -Parent
+            if (Test-Path $dir -EA SilentlyContinue) {
+                $enc = New-Object System.Text.UTF8Encoding($true)
+                [System.IO.File]::WriteAllText($dest, $script, $enc)
+            }
+        } catch {}
+    }
+}
+
+function Disable-DeployResume {
+    <#
+    .SYNOPSIS Desarme la reprise : autologon OFF + RunOnce + tache planifiee
+        supprimes. A appeler quand la boucle de reprise est terminee (0 MAJ,
+        fin de sequence...) pour ne pas reboucler ni laisser le mdp en clair.
+    #>
+    if (Test-IsWinPE) { return }
+    try {
+        $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue
+        Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue
+        $runOnce = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+        Remove-ItemProperty $runOnce -Name 'PSWinDeployResume' -Force -EA SilentlyContinue
+        Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue
+        Write-TSLog "Reprise desarmee (autologon + tache supprimes)." -Level INFO
+    } catch {}
+}
+
+function Set-DeployAutologon {
+    <#
+    .SYNOPSIS Re-arme l'autologon pour le PROCHAIN boot + lance la reprise en
+        fenetre PowerShell VISIBLE via RunOnce.
+    .DESCRIPTION
+        Permet a la phase 2 de reprendre dans une SESSION interactive (fenetre
+        PowerShell visible) apres un reboot, au lieu d'une tache SYSTEM invisible.
+        Indispensable pour l'assistant interactif (ShowWizard) et pour voir ce
+        qui se passe. On re-arme a CHAQUE reboot tant que la sequence n'est pas
+        finie (AutoAdminLogon=1 + AutoLogonCount=1).
+    .PARAMETER Username Compte autologon (defaut Administrator).
+    .PARAMETER Password Mot de passe du compte (obligatoire pour l'autologon).
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Username = 'Administrator',
+        [string]$Password,
+        [string]$ResumeScript = 'C:\Deploy\Scripts\Start-Deploy.ps1'
+    )
+    if (Test-IsWinPE) { return $false }
+    try {
+        $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty $winlogon -Name 'AutoAdminLogon' -Value '1' -Type String -Force
+        Set-ItemProperty $winlogon -Name 'DefaultUserName' -Value $Username -Type String -Force
+        if ($Password) { Set-ItemProperty $winlogon -Name 'DefaultPassword' -Value $Password -Type String -Force }
+        # AutoLogonCount = 1 : un seul autologon, qu'on re-arme a chaque reboot.
+        Set-ItemProperty $winlogon -Name 'AutoLogonCount' -Value 1 -Type DWord -Force
+        # RunOnce : lance la reprise en fenetre PowerShell VISIBLE a l'ouverture de session.
+        $localSeq = 'C:\Deploy\Runtime\sequence.psd1'
+        $runArg = "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$ResumeScript`" -Resume"
+        if (Test-Path $localSeq -EA SilentlyContinue) { $runArg += " -SequencePath `"$localSeq`"" }
+        $runOnce = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+        Set-ItemProperty $runOnce -Name 'PSWinDeployResume' -Value "powershell.exe $runArg" -Type String -Force
+        Write-TSLog "Autologon re-arme + reprise en fenetre PowerShell visible (RunOnce)." -Level SUCCESS
+        return $true
+    } catch {
+        Write-TSLog "Set-DeployAutologon erreur : $_" -Level WARN
+        return $false
+    }
+}
+
 function Set-DeployResumeTask {
     <#
     .SYNOPSIS Cree une tache planifiee qui relance la phase 2 au prochain demarrage.
@@ -536,23 +671,34 @@ function Set-DeployResumeTask {
     #>
     [CmdletBinding()]
     param([string]$ResumeScript = 'C:\Deploy\Scripts\Start-Deploy.ps1')
-    if (Test-IsWinPE) { return }  # seulement en phase 2 (Windows)
+    if (Test-IsWinPE) { return $false }  # seulement en phase 2 (Windows)
     try {
-        $localSeq = Join-Path (Join-Path (Get-DeployRoot) 'Runtime') (Split-Path $SequencePath -Leaf)
-        $seqArg = if (Test-Path $localSeq -EA SilentlyContinue) { $localSeq } else { 'C:\Deploy\Runtime\sequence.psd1' }
-        $action  = "-NoProfile -ExecutionPolicy Bypass -File `"$ResumeScript`" -Resume -SequencePath `"$seqArg`""
-        # Supprimer une tache existante puis recreer (idempotent)
-        & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null
-        & schtasks.exe /Create /TN 'PSWinDeployResume' /TR "powershell.exe $action" `
-            /SC ONSTART /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-TSLog "Tache de reprise planifiee creee (PSWinDeployResume, au demarrage, SYSTEM)" -Level SUCCESS
-            return $true
+        # Chemin de la sequence : TOUJOURS le chemin fixe local (blindage).
+        # On n'utilise PAS $SequencePath (variable de module potentiellement vide
+        # dans ce scope -> Split-Path plantait avec 'fichier introuvable').
+        $seqArg = 'C:\Deploy\Runtime\sequence.psd1'
+        # Verifier que le script de reprise existe (sinon la tache serait inutile).
+        if (-not (Test-Path $ResumeScript -EA SilentlyContinue)) {
+            Write-TSLog "Set-DeployResumeTask : script de reprise introuvable ($ResumeScript) -- tache non creee." -Level WARN
+            return $false
         }
-        Write-TSLog "Creation tache de reprise echouee (code $LASTEXITCODE) -- repli sur RunOnce" -Level WARN
-        return $false
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path $psExe -EA SilentlyContinue)) { $psExe = 'powershell.exe' }
+        # Utiliser l'API native Register-ScheduledTask : gere proprement les
+        # arguments avec guillemets (schtasks /TR les cassait -> 'fichier introuvable').
+        $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$ResumeScript`" -Resume -SequencePath `"$seqArg`""
+        try {
+            Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue
+        } catch {}
+        $taskAction    = New-ScheduledTaskAction -Execute $psExe -Argument $psArgs
+        $taskTrigger   = New-ScheduledTaskTrigger -AtStartup
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $taskSettings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName 'PSWinDeployResume' -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Force -EA Stop | Out-Null
+        Write-TSLog "Tache de reprise creee (PSWinDeployResume, au demarrage, SYSTEM)." -Level SUCCESS
+        return $true
     } catch {
-        Write-TSLog "Set-DeployResumeTask erreur : $_" -Level WARN
+        Write-TSLog "Set-DeployResumeTask erreur (non bloquant) : $_" -Level WARN
         return $false
     }
 }
@@ -653,10 +799,12 @@ function Invoke-DeployReboot {
     Write-TSLog "Reprise prevue au step : $($State.nextStepId)" -Level WARN
 
     Save-DeployState -State $State
-    # Copier scripts/modules/runtime/vault/state sur W: (deviendra C: apres reboot)
+    # Copier scripts/modules/runtime/vault/state sur W: (deviendra C: apres reboot).
+    # UNIQUEMENT en phase 1 (WinPE) : en phase 2, on est deja sur C:, W: n'existe
+    # pas, et le state est deja sauve au bon endroit par Save-DeployState.
     if ($NoCopyDeploy) {
         Write-TSLog "Copy-DeployToTarget SAUTE (diagnostic)" -Level WARN
-    } else {
+    } elseif (Test-IsWinPE) {
         Copy-DeployToTarget -TargetDrive 'W:'
     }
     if ($NoRunOnce) {
@@ -665,10 +813,24 @@ function Invoke-DeployReboot {
         # WinPE : reprise via RunOnce/unattend (1er boot)
         Set-DeployRunOnce
     } else {
-        # PHASE 2 (Windows demarre) : tache planifiee au demarrage = reprise FIABLE
-        # apres CHAQUE reboot (l'autologon LogonCount=1 ne marche qu'une fois).
+        # PHASE 2 (Windows demarre) : DOUBLE mecanisme de reprise.
+        #  1. AUTOLOGON + RunOnce -> reprise en fenetre PowerShell VISIBLE (pour
+        #     voir le deroulement et permettre l'assistant interactif).
+        #  2. Tache planifiee SYSTEM -> filet de securite (si l'autologon echoue).
+        # On re-arme l'autologon a CHAQUE reboot (AutoLogonCount=1).
+        $adminPwd = $null
+        try { $adminPwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch {}
+        $autoOk = $false
+        if ($adminPwd) {
+            $adminName = Get-LocalAdminName   # 'Administrateur' en FR, etc.
+            Write-TSLog "Autologon avec le compte admin local : $adminName" -Level INFO
+            $autoOk = Set-DeployAutologon -Username $adminName -Password $adminPwd
+        } else {
+            Write-TSLog "localAdminPassword absent du vault -- autologon non arme (reprise en tache SYSTEM)." -Level WARN
+        }
+        # Filet : tache planifiee (marche meme sans autologon, en SYSTEM)
         $taskOk = Set-DeployResumeTask
-        if (-not $taskOk) { Set-DeployRunOnce }  # repli si la tache echoue
+        if (-not $autoOk -and -not $taskOk) { Set-DeployRunOnce }
     }
 
     Write-TSLog "Sauvegarde etat OK -- redemarrage..." -Level WARN
@@ -912,6 +1074,27 @@ function Invoke-StepJoinDomain {
     }
     if ([string]::IsNullOrWhiteSpace($domain)) { throw "JoinDomain : 'domain' obligatoire (step ou config DomainName)" }
 
+    # IDEMPOTENCE : si la machine est DEJA jointe au domaine cible, ne rien faire.
+    # Indispensable car le step est rejoue apres le reboot de jonction (sinon il
+    # echouerait : 'poste deja joint'). On compare le domaine actuel au cible.
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem -EA Stop
+        if ($cs.PartOfDomain) {
+            $currentDomain = "$($cs.Domain)"
+            # Comparaison souple : 'corp.local' vs 'CORP' (NetBIOS) vs FQDN.
+            $targetShort = ($domain -split '\.')[0]
+            $currentShort = ($currentDomain -split '\.')[0]
+            if ($currentDomain -ieq $domain -or $currentShort -ieq $targetShort) {
+                Write-TSLog "Machine deja jointe au domaine '$currentDomain' -- step JoinDomain saute." -Level SUCCESS -StepId $Step.id
+                return @{ Success = $true; RebootRequired = $false }
+            } else {
+                Write-TSLog "Machine jointe a '$currentDomain' mais cible = '$domain' -- on continue." -Level WARN -StepId $Step.id
+            }
+        }
+    } catch {
+        Write-TSLog "Verification appartenance domaine impossible : $_ -- on tente la jonction." -Level INFO -StepId $Step.id
+    }
+
     Write-TSLog "JoinDomain (via Add-Computer PowerShell) : $domain" -Level INFO -StepId $Step.id
 
     # Detecter si on a une SESSION INTERACTIVE (sinon, pas de prompt possible :
@@ -982,16 +1165,35 @@ function Invoke-StepInstallUpdates {
         return @{ Success = $true; RebootRequired = $false; Deferred = $true }
     }
 
+    # Limite de cycles reboot+reprise pour ce step (anti-boucle infinie).
+    # Compteur persiste dans un fichier (survit aux reboots).
+    $maxPasses = Get-StepParam $Step 'maxPasses' -Default 5
+    $passFile = 'C:\Deploy\Logs\.updates-passes'
+    $passCount = 0
+    try { if (Test-Path $passFile -EA SilentlyContinue) { $passCount = [int](Get-Content $passFile -Raw -EA SilentlyContinue) } } catch {}
+    if ($passCount -ge $maxPasses) {
+        Write-TSLog "Limite de $maxPasses passes de MAJ atteinte -- on arrete (evite la boucle infinie)." -Level WARN -StepId $Step.id
+        try { Remove-Item $passFile -Force -EA SilentlyContinue } catch {}
+        return @{ Success = $true; RebootRequired = $false }
+    }
+
+    # (L'armement de la reprise est CENTRALISE au niveau de la sequence :
+    #  arme une fois au debut de Invoke-TaskSequence, desarme a la fin. Voir
+    #  Enable-DeployResume / Disable-DeployResume.)
+
     # Phase 2 : Windows demarre. API COM native Microsoft.Update (AUCUNE
     # dependance : pas besoin de PSWindowsUpdate ni d'Internet si WSUS configure).
     try {
-        Write-TSLog "Recherche des mises a jour (API Windows Update native)..." -Level INFO -StepId $Step.id
+        Write-TSLog "Recherche des mises a jour (passe $($passCount+1)/$maxPasses)..." -Level INFO -StepId $Step.id
         $session  = New-Object -ComObject Microsoft.Update.Session
         $searcher = $session.CreateUpdateSearcher()
         $result   = $searcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
 
         if (@($result.Updates).Count -eq 0) {
-            Write-TSLog "Aucune mise a jour disponible." -Level SUCCESS -StepId $Step.id
+            # 0 MAJ = termine. Nettoyer le compteur, DESARMER la reprise, et
+            # passer au step suivant SANS reboot. C'est la condition d'arret.
+            Write-TSLog "Aucune mise a jour disponible -- etape MAJ terminee." -Level SUCCESS -StepId $Step.id
+            try { Remove-Item $passFile -Force -EA SilentlyContinue } catch {}
             return @{ Success = $true; RebootRequired = $false }
         }
         Write-TSLog "$(@($result.Updates).Count) mise(s) a jour trouvee(s)" -Level INFO -StepId $Step.id
@@ -1019,11 +1221,27 @@ function Invoke-StepInstallUpdates {
         $installResult = $installer.Install()
         Write-TSLog "Installation terminee (code $($installResult.ResultCode), 2=succes)" -Level SUCCESS -StepId $Step.id
         if ($installResult.RebootRequired) {
-            Write-TSLog "Un redemarrage est requis." -Level WARN -StepId $Step.id
+            # Incrementer le compteur de passes (persiste pour la reprise).
+            try {
+                $pf = 'C:\Deploy\Logs\.updates-passes'
+                $pc = 0; if (Test-Path $pf -EA SilentlyContinue) { $pc = [int](Get-Content $pf -Raw -EA SilentlyContinue) }
+                Set-Content $pf -Value ($pc + 1) -Force -EA SilentlyContinue
+            } catch {}
+            Write-TSLog "Un redemarrage est requis -- le step MAJ reprendra apres le reboot pour une nouvelle passe." -Level WARN -StepId $Step.id
             $script:RebootRequired = $true
-            return @{ Success = $true; RebootRequired = $true }
+            # IMPORTANT : ne PAS marquer le step comme termine -> il sera rejoue
+            # apres reboot pour chercher d'autres MAJ. On signale 'StayOnStep'.
+            return @{ Success = $true; RebootRequired = $true; StayOnStep = $true }
         }
-        return @{ Success = $true; RebootRequired = $false }
+        # Pas de reboot requis : il peut rester des MAJ a installer immediatement.
+        # On RE-boucle dans le meme step (sans reboot) jusqu'a 0 MAJ.
+        try {
+            $pf = 'C:\Deploy\Logs\.updates-passes'
+            $pc = 0; if (Test-Path $pf -EA SilentlyContinue) { $pc = [int](Get-Content $pf -Raw -EA SilentlyContinue) }
+            Set-Content $pf -Value ($pc + 1) -Force -EA SilentlyContinue
+        } catch {}
+        Write-TSLog "Passe de MAJ installee sans reboot -- nouvelle recherche..." -Level INFO -StepId $Step.id
+        return (Invoke-StepInstallUpdates -Step $Step)
     } catch {
         Write-TSLog "Windows Update (API native) a echoue : $_" -Level WARN -StepId $Step.id
         return @{ Success = $false; RebootRequired = $false }
@@ -1065,9 +1283,16 @@ function Invoke-StepInstallSoftware {
                 if ($wg) {
                     Write-TSLog "  Tentative winget : $wingetId ($wg)" -Level INFO -StepId $Step.id
                     try {
-                        & $wg install --id $wingetId --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+                        # Commande SIMPLE d'abord (exactement comme en terminal, ce
+                        # qui marche). La sortie est capturee pour diagnostic.
+                        $wgOut = & $wg install --id $wingetId --silent --accept-package-agreements --accept-source-agreements 2>&1
                         if ($LASTEXITCODE -eq 0) { $ok = $true; Write-TSLog "  winget OK : $nm" -Level SUCCESS -StepId $Step.id }
-                        else { Write-TSLog "  winget a echoue (code $LASTEXITCODE) -- repli choco si dispo" -Level WARN -StepId $Step.id }
+                        else {
+                            # Repli : forcer le scope machine (utile en contexte deploiement)
+                            $wgOut2 = & $wg install --id $wingetId --scope machine --silent --accept-package-agreements --accept-source-agreements 2>&1
+                            if ($LASTEXITCODE -eq 0) { $ok = $true; Write-TSLog "  winget OK (scope machine) : $nm" -Level SUCCESS -StepId $Step.id }
+                            else { Write-TSLog "  winget echec (code $LASTEXITCODE) : $($wgOut2 | Select-Object -Last 1) -- repli choco" -Level WARN -StepId $Step.id }
+                        }
                     } catch { Write-TSLog "  winget erreur : $_ -- repli choco si dispo" -Level WARN -StepId $Step.id }
                 } else {
                     Write-TSLog "  winget introuvable sur ce poste -- repli choco si dispo" -Level INFO -StepId $Step.id
@@ -1131,13 +1356,16 @@ function Invoke-StepInstallSoftware {
             Write-TSLog "Installation app : $appName" -Level INFO -StepId $Step.id
             $ok = $false
 
-            # 1) winget (cherche meme hors PATH)
+            # 1) winget (cherche meme hors PATH, --scope machine pour le deploiement)
             $wg = Resolve-WingetPath
             if (-not $ok -and $wg) {
                 try {
                     $out = & $wg install --id $appName --silent --accept-package-agreements --accept-source-agreements 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        $out = & $wg install --id $appName --scope machine --silent --accept-package-agreements --accept-source-agreements 2>&1
+                    }
                     if ($LASTEXITCODE -eq 0) { $ok = $true; Write-TSLog "  winget OK : $appName" -Level SUCCESS -StepId $Step.id }
-                    else { Write-TSLog "  winget n'a pas installe $appName (code $LASTEXITCODE), essai suivant" -Level INFO -StepId $Step.id }
+                    else { Write-TSLog "  winget n'a pas installe $appName (code $LASTEXITCODE) : $($out | Select-Object -Last 1), essai suivant" -Level INFO -StepId $Step.id }
                 } catch { Write-TSLog "  winget erreur : $_" -Level INFO -StepId $Step.id }
             }
 
@@ -1244,8 +1472,10 @@ function Invoke-StepCleanup {
     $keepLogs = Get-StepParam $Step 'keepLogs' -Default $true
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return @{ Success = $true } }
-    # Supprimer la tache de reprise (plus besoin)
+    # Desarmer la reprise (autologon + tache) et retirer le script de secours.
+    if (Get-Command Disable-DeployResume -EA SilentlyContinue) { Disable-DeployResume }
     try { & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+    try { Remove-Item "$env:PUBLIC\Desktop\Reset-PSWinDeploy.ps1" -Force -EA SilentlyContinue } catch {}
     # Elements a supprimer (sensibles ou inutiles apres deploiement)
     $toRemove = @('secrets.vault.psd1','secrets.vault','deploy-config.psd1','PSWinDeploy.psd1','state.psd1','Scripts','Modules','Runtime')
     foreach ($item in $toRemove) {
@@ -1296,9 +1526,12 @@ function Resolve-WingetPath {
         Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*. Retourne le
         chemin utilisable, ou $null si introuvable.
     #>
-    $cmd = Get-Command winget -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    # Chercher le vrai binaire (la version la plus recente)
+    # PRIORITE : si 'winget' est dans le PATH, l'utiliser TEL QUEL (comme en
+    # terminal interactif -- c'est ce qui marche). Retourner le nom simple
+    # 'winget' (pas le chemin complet) pour reproduire exactement la commande
+    # qui fonctionne quand on la tape soi-meme.
+    if (Get-Command winget -ErrorAction SilentlyContinue) { return 'winget' }
+    # Sinon SEULEMENT : chercher le vrai binaire hors PATH (la version recente)
     $base = Join-Path $env:ProgramFiles 'WindowsApps'
     if (Test-Path $base -EA SilentlyContinue) {
         $candidate = Get-ChildItem $base -Filter 'Microsoft.DesktopAppInstaller_*' -Directory -EA SilentlyContinue |
@@ -1864,6 +2097,13 @@ function Invoke-TaskSequence {
 
     Write-TSLog "Demarrage au step index $startIdx / $(@($sequence.steps).Count - 1)" -Level INFO
 
+    # CENTRALISATION DE LA REPRISE : en phase 2, armer l'autologon + la tache
+    # UNE fois au debut de la sequence (re-arme a chaque reboot via Invoke-DeployReboot).
+    # Depose aussi le script de secours Reset-PSWinDeploy.ps1. Desarme a la fin.
+    if (-not (Test-IsWinPE) -and $PhaseFilter -ne 'WinPE') {
+        Enable-DeployResume
+    }
+
     foreach ($step in $stepsToRun) {
 
         # Step desactive
@@ -1885,6 +2125,24 @@ function Invoke-TaskSequence {
             continue
         }
 
+        # MARQUEUR "JE COMMENCE CETTE ACTION" : ecrire AVANT l'execution quel
+        # step est en cours. Si reboot inopine ou plantage, ce fichier indique
+        # exactement quel step etait actif (diagnostic + reprise au bon endroit).
+        $markerFile = Join-Path (Get-DeployRoot) 'Logs\.current-step'
+        try {
+            $markerInfo = @(
+                "stepId=$($step.id)"
+                "stepName=$($step.name)"
+                "stepType=$($step.type)"
+                "startedAt=$(Get-Date -Format 'o')"
+                "computer=$env:COMPUTERNAME"
+            ) -join "`r`n"
+            $mkDir = Split-Path $markerFile -Parent
+            if (-not (Test-Path $mkDir -EA SilentlyContinue)) { New-Item -ItemType Directory $mkDir -Force -EA SilentlyContinue | Out-Null }
+            Set-Content -Path $markerFile -Value $markerInfo -Encoding UTF8 -EA SilentlyContinue
+            Write-TSLog "[DEBUT] Step '$($step.name)' [$($step.type)]" -Level STEP -StepId $step.id
+        } catch {}
+
         # Execution
         # Capturer uniquement le hashtable de resultat (eviter pollution pipeline)
         # Hook : debut d'etape (GUI)
@@ -1893,6 +2151,12 @@ function Invoke-TaskSequence {
         $resultRaw = @(Invoke-DeployStep -Step $step -Sequence $sequence -State $state)
         $result = $resultRaw | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
         if (-not $result) { $result = @{ Success = $true; RebootRequired = $false } }
+
+        # Step termine (sans reboot) : retirer le marqueur "en cours". Si un reboot
+        # suit, on LAISSE le marqueur (il indique qu'on a redemarre pendant ce step).
+        if (-not ($result.RebootRequired)) {
+            try { Remove-Item $markerFile -Force -EA SilentlyContinue } catch {}
+        }
 
         # Gestion du reboot
         $rebootPolicy = if ($step.rebootAfter) { $step.rebootAfter } else { 'IfRequired' }
@@ -1913,7 +2177,12 @@ function Invoke-TaskSequence {
 
             # Si c'est un Reboot explicite avec continueAt, utiliser ca
             $continueAt = Get-StepParam $step 'continueAt'
-            if ($step.type -eq 'Reboot' -and $continueAt) {
+            # StayOnStep : le step demande a etre REJOUE apres le reboot (ex:
+            # InstallUpdates qui fait plusieurs passes jusqu'a 0 MAJ).
+            $stayOnStep = ($result -and $result.PSObject.Properties['StayOnStep'] -and $result.StayOnStep)
+            if ($stayOnStep) {
+                $state.nextStepId = $step.id   # rejouer le MEME step apres reboot
+            } elseif ($step.type -eq 'Reboot' -and $continueAt) {
                 $state.nextStepId = $continueAt
             } elseif ($nextStep) {
                 $state.nextStepId = $nextStep.id
@@ -2002,6 +2271,15 @@ function Invoke-TaskSequence {
         Write-TSLog "==============================================" -Level SUCCESS
     }
 
+    # SEQUENCE TERMINEE : desarmer la reprise (autologon OFF, tache supprimee,
+    # mot de passe retire du registre). Centralise : un seul endroit de desarmement.
+    if (-not (Test-IsWinPE)) {
+        Disable-DeployResume
+        # Le script de secours n'est plus utile -- le retirer.
+        try { Remove-Item 'C:\Deploy\Reset-PSWinDeploy.ps1' -Force -EA SilentlyContinue } catch {}
+        try { Remove-Item "$env:PUBLIC\Desktop\Reset-PSWinDeploy.ps1" -Force -EA SilentlyContinue } catch {}
+    }
+
     return $state
 }
 
@@ -2023,6 +2301,11 @@ Export-ModuleMember -Function @(
     'Remove-DeployState'
     'Invoke-DeployReboot'
     'Set-DeployResumeTask'
+    'Set-DeployAutologon'
+    'Get-LocalAdminName'
+    'Disable-DeployResume'
+    'Enable-DeployResume'
+    'Write-DeployResetScript'
     'Remove-DeployResumeTask'
     'Install-Chocolatey'
 )

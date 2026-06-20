@@ -247,6 +247,21 @@ function Build-SequenceInteractive {
 
     Write-PILog "Construction d'une sequence a la volee" 'STEP'
 
+    # Jonction domaine : proposee en 1er (elle doit se faire avant le reste).
+    # Le domaine/OU sont lus depuis PSWinDeploy.psd1 (DomainName/DomainOU), les
+    # credentials depuis le vault (domainJoinUser/domainJoinPassword).
+    $doDomain = $false
+    $cfgDomainName = ''
+    try { if (Get-Command Get-PSWinDeployConfig -EA SilentlyContinue) { $cfgDomainName = Get-PSWinDeployConfig -Key 'DomainName' } } catch {}
+    if ($cfgDomainName) {
+        $doDomain = Request-PSWDYesNo -Question "Joindre le domaine $cfgDomainName ?" -Default $false
+    } else {
+        if (Request-PSWDYesNo -Question "Joindre un domaine Active Directory ?" -Default $false) {
+            $cfgDomainName = Request-PSWDString -Question "Nom du domaine (ex: corp.local)" -Default ''
+            if ($cfgDomainName) { $doDomain = $true }
+        }
+    }
+
     $doUpdates = Request-PSWDYesNo -Question "Installer les mises a jour Windows ?" -Default $true
     $doApps    = Request-PSWDYesNo -Question "Installer des applications ?" -Default $false
     $doScript  = Request-PSWDYesNo -Question "Executer un ou des scripts PowerShell ?" -Default $false
@@ -355,6 +370,12 @@ function Build-SequenceInteractive {
     # Generer la sequence
     $steps = @()
     $n = 1
+    # Jonction domaine EN PREMIER (RebootAfter='Always' : reboot apres jonction)
+    if ($doDomain -and $cfgDomainName) {
+        $dnEsc3 = "$cfgDomainName".Replace("'","''")
+        $steps += "        @{ Id = 'pi-$('{0:D2}' -f $n)'; Type = 'JoinDomain'; Name = 'Jonction au domaine'; Phase = 'Windows'; Enabled = `$true; RebootAfter = 'Always'; Params = @{ domain = '$dnEsc3' } }"
+        $n++
+    }
     if ($doUpdates) {
         $steps += "        @{ Id = 'pi-$('{0:D2}' -f $n)'; Type = 'InstallUpdates'; Name = 'Mises a jour Windows'; Phase = 'Windows'; Enabled = `$true; RebootAfter = 'IfRequired'; Params = @{} }"
         $n++

@@ -1,0 +1,33 @@
+@{
+    Id    = 'poste-domaine'
+    Name  = 'Poste avec jonction domaine'
+    Steps = @(
+        # 1) Jonction au domaine EN PREMIER. domain/ou sont lus depuis
+        #    PSWinDeploy.psd1 (DomainName / DomainOU) si non precises ici.
+        #    Credentials depuis le vault (domainJoinUser / domainJoinPassword).
+        @{
+            Id = 'join'; Type = 'JoinDomain'; Name = 'Jonction au domaine'
+            Phase = 'Windows'; Enabled = $true; RebootAfter = 'Always'
+            # Params = @{ domain = 'corp.local'; ou = 'OU=PCs,DC=corp,DC=local' }
+        }
+        # 2) Mises a jour Windows (plusieurs passes, s'arrete a 0 MAJ)
+        @{
+            Id = 'updates'; Type = 'InstallUpdates'; Name = 'Mises a jour'
+            Phase = 'Windows'; Enabled = $true; RebootAfter = 'IfRequired'
+        }
+        # 3) Applications (depuis le catalogue)
+        @{
+            Id = 'apps'; Type = 'InstallApps'; Name = 'Applications'
+            Phase = 'Windows'; Enabled = $true; RebootAfter = 'IfRequired'
+            Params = @{ catalogApps = @(
+                @{ Name = 'Google Chrome'; WingetId = 'Google.Chrome'; ChocoId = 'googlechrome' }
+            ) }
+        }
+        # 4) Nettoyage final (supprime les fichiers sensibles de C:\Deploy)
+        @{
+            Id = 'cleanup'; Type = 'Cleanup'; Name = 'Nettoyage final'
+            Phase = 'Windows'; Enabled = $true; RebootAfter = 'Never'
+            Params = @{ keepLogs = $true }
+        }
+    )
+}
