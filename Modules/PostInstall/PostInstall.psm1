@@ -168,9 +168,9 @@ function Show-PostInstallWizard {
     #>
     param([string]$SeqDir, [string]$RuntimeDir = 'C:\Deploy\Runtime', [string]$ScriptShare = '', [string]$SoftwareShare = '', [string]$CatalogueShare = '')
 
-    Write-PILog "=== Installation terminee. Que souhaitez-vous faire ? ===" 'STEP'
+    Write-PILog "=== Menu de deploiement -- Que souhaitez-vous faire ? ===" 'STEP'
 
-    $choice = Show-PSWDList -Title "Installation terminee. Que souhaitez-vous faire ?" -Items @(
+    $choice = Show-PSWDList -Title "Menu de deploiement -- Que souhaitez-vous faire ?" -Items @(
         'Partir d''un modele de sequence',
         'Construire a la volee (applications / MAJ / scripts)',
         'Terminer le deploiement (nettoie C:\Deploy, garde Logs)',
@@ -206,11 +206,54 @@ function Invoke-PostInstallCleanup {
     Write-PILog "Nettoyage de fin de deploiement (C:\Deploy)..." 'STEP'
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return }
-    try { & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
-    foreach ($item in @('secrets.vault.psd1','secrets.vault','deploy-config.psd1','PSWinDeploy.psd1','state.psd1','Scripts','Modules','Runtime')) {
+    try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:`$false -EA SilentlyContinue | Out-Null } catch {}
+
+    # Supprimer d'abord les fichiers sensibles (vault, config, state) -- toujours
+    # possible. Les dossiers Scripts/Modules/Runtime contiennent le script en cours
+    # d'execution : on ne peut PAS les supprimer maintenant (fichier verrouille).
+    # On les marque pour suppression au prochain boot (ou on previent l'operateur).
+    $deletedNow = @()
+    $deferred   = @()
+    foreach ($item in @('secrets.vault.psd1','secrets.vault','deploy-config.psd1','PSWinDeploy.psd1','state.psd1')) {
         $p = Join-Path $root $item
         if (Test-Path $p -EA SilentlyContinue) {
-            try { Remove-Item $p -Recurse -Force -EA SilentlyContinue; Write-PILog "  Supprime : $item" 'INFO' } catch {}
+            try {
+                Remove-Item $p -Recurse -Force -EA Stop
+                $deletedNow += $item
+            } catch { $deferred += $item }
+        }
+    }
+    # Dossiers : tenter, mais ne PAS pretendre avoir reussi si echec (script actif).
+    foreach ($item in @('Runtime','Modules','Scripts')) {
+        $p = Join-Path $root $item
+        if (Test-Path $p -EA SilentlyContinue) {
+            try {
+                Remove-Item $p -Recurse -Force -EA Stop
+                $deletedNow += $item
+            } catch { $deferred += $item }
+        }
+    }
+    # Marqueurs internes
+    foreach ($mk in @('.domain-joined','.current-step','.updates-passes','.resume-lock')) {
+        try { Remove-Item (Join-Path $root "Logs\$mk") -Force -EA SilentlyContinue } catch {}
+    }
+
+    foreach ($d in $deletedNow) { Write-PILog "  Supprime : $d" 'INFO' }
+    if ($deferred.Count -gt 0) {
+        # Programmer la suppression des dossiers restants au prochain demarrage
+        # (le script ne sera plus en cours d'execution). On utilise une tache
+        # one-shot qui supprime puis se supprime elle-meme.
+        try {
+            $delList = ($deferred | ForEach-Object { "'$root\$_'" }) -join ','
+            $cmd = "Start-Sleep 5; Remove-Item $delList -Recurse -Force -EA SilentlyContinue; Unregister-ScheduledTask -TaskName 'PSWinDeployFinalClean' -Confirm:`$false -EA SilentlyContinue"
+            $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $act = New-ScheduledTaskAction -Execute $psExe -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`""
+            $trg = New-ScheduledTaskTrigger -AtStartup
+            $prn = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+            Register-ScheduledTask -TaskName 'PSWinDeployFinalClean' -Action $act -Trigger $trg -Principal $prn -Force -EA SilentlyContinue | Out-Null
+            Write-PILog "  Dossiers restants ($($deferred -join ', ')) : suppression programmee au prochain demarrage." 'INFO'
+        } catch {
+            Write-PILog "  Dossiers restants ($($deferred -join ', ')) : a supprimer manuellement (script en cours d'execution)." 'WARN'
         }
     }
     Write-PILog "Nettoyage termine. Logs conserves : C:\Deploy\Logs" 'OK'

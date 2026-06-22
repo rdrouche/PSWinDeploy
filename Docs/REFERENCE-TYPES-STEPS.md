@@ -75,6 +75,33 @@ reboot si necessaire (utilisez RebootAfter='IfRequired').
 Installe des applications en cascade winget -> choco -> exe/msi. Chocolatey est
 installe automatiquement si requis et absent.
 
+**Trois facons de declarer les apps (de la plus simple a la plus detaillee) :**
+
+1. Par NOM, resolu depuis le catalogue (le plus simple) :
+```powershell
+@{ Id='apps'; Type='InstallApps'; Phase='Windows'; RebootAfter='IfRequired';
+   Params=@{ apps = @('Google Chrome', '7-Zip') } }
+```
+   Les noms sont cherches dans le catalogue (CataloguePath du psd1) qui fournit
+   WingetId/ChocoId/Installer. Pas besoin de repeter les details.
+
+2. Par objets riches (si pas de catalogue, ou pour surcharger) :
+```powershell
+@{ Id='apps'; Type='InstallApps'; Phase='Windows';
+   Params=@{ catalogApps = @(
+       @{ Name='Chrome'; WingetId='Google.Chrome'; ChocoId='googlechrome' }
+   ) } }
+```
+
+3. Option pour forcer winget (eviter choco) :
+```powershell
+   Params=@{ apps = @('Google Chrome'); noChoco = $true }
+```
+   Avec noChoco, si winget echoue, l'app n'est PAS installee via choco.
+
+Le moteur initialise winget automatiquement (enregistrement du package App
+Installer) pour qu'il fonctionne en deploiement.
+
 ```powershell
 @{ Id='apps'; Type='InstallApps'; Name='Applications'; Phase='Windows';
    RebootAfter='IfRequired';

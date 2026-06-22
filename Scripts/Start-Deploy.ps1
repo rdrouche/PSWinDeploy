@@ -937,7 +937,7 @@ try {
     # -- Mode assistant post-install SEUL (fenetre visible, lance par la phase 2) --
     if ($PostInstallWizard) {
         Write-Step "Assistant post-installation"
-        foreach ($m in @('Hooks','NetShare','TaskSequence','SimpleDeploy','PostInstall')) {
+        foreach ($m in @('Hooks','NetShare','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','SimpleDeploy','PostInstall')) {
             try { Import-DeployModule $m } catch { Write-Warn "Module $m : $_" }
         }
         # Config deja chargee + chemins resolus (singleton). On LIT, point.
@@ -957,21 +957,43 @@ try {
             try {
                 $built = Show-PostInstallWizard -SeqDir $seqShare -RuntimeDir 'C:\Deploy\Runtime' -ScriptShare $scriptShare -SoftwareShare $softwareShare -CatalogueShare $catalogueShare
                 if ($built -is [hashtable] -and $built.ContainsKey('__action')) {
-                    # L'utilisateur a choisi de terminer (avec ou sans nettoyage,
-                    # deja gere dans l'assistant). On sort de la boucle.
+                    # L'utilisateur a choisi de terminer (avec ou sans nettoyage).
+                    # DESARMER le mode deploiement : autologon OFF + tache supprimee.
+                    # C'est le SEUL endroit qui desarme (fin du deploiement).
+                    if (Get-Command Disable-DeploymentMode -EA SilentlyContinue) { Disable-DeploymentMode }
                     $wizardDone = $true
                 } elseif ($built) {
                     Write-OK "Sequence prete : $built"
                     Write-Host ""
-                    # Sequence NEUVE : repartir du 1er step (pas de vieux state).
-                    Remove-Item 'C:\Deploy\state.psd1' -Force -EA SilentlyContinue
-                    Invoke-TaskSequence -SequencePath $built -PhaseFilter 'Windows'
-                    Remove-Item 'C:\Deploy\state.psd1' -Force -EA SilentlyContinue
-                    try { & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+                    # FLUX UNIFIE : la sequence generee est mise en local puis le
+                    # MOTEUR la deroule (exactement comme by-name). Etat neuf.
+                    Remove-Item 'C:\Deploy\Runtime\state.psd1' -Force -EA SilentlyContinue
+                    if ("$built" -ne 'C:\Deploy\Runtime\sequence.psd1') {
+                        New-Item -ItemType Directory 'C:\Deploy\Runtime' -Force -EA SilentlyContinue | Out-Null
+                        Copy-Item $built 'C:\Deploy\Runtime\sequence.psd1' -Force -EA SilentlyContinue
+                    }
+                    # Mode deploiement (autologon + reprise) arme avant de lancer.
+                    if (Get-Command Enable-DeploymentMode -EA SilentlyContinue) {
+                        $apwd = $null
+                        try { $apwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch {}
+                        Enable-DeploymentMode -AdminPassword $apwd
+                    }
+                    $ctxV = @{
+                        LogsDir   = 'C:\Deploy\Logs'
+                        GetConfig = { param($k) Get-Cfg $k }
+                        GetSecret = { param($k) Get-Secret -Source vault -Key $k }
+                    }
+                    Invoke-Engine -SequencePath 'C:\Deploy\Runtime\sequence.psd1' -Context $ctxV -PhaseFilter 'Windows' | Out-Null
+                    Remove-Item 'C:\Deploy\Runtime\state.psd1' -Force -EA SilentlyContinue
                     Write-Host ""
-                    Write-OK "Sequence terminee."
-                    $again = Read-Host "  Revenir au menu de l'assistant ? (o/N)"
-                    if ($again -notmatch '^[oO]') { $wizardDone = $true }
+                    Write-Host "  ============================================" -ForegroundColor Green
+                    Write-OK "  Sequence terminee : les actions demandees ont ete realisees."
+                    Write-Host "  ============================================" -ForegroundColor Green
+                    Write-Host ""
+                    # Pause explicite : l'operateur voit le resultat, appuie sur
+                    # Entree, PUIS on revient au menu (pour nettoyer ou autre).
+                    Read-Host "  Appuyez sur Entree pour revenir au menu"
+                    Write-Host ""
                 } else {
                     $wizardDone = $true
                 }
@@ -1004,7 +1026,7 @@ try {
 
     # -- Import des modules locaux (dans le WIM) --
     Write-Step "Chargement des modules..."
-    foreach ($m in @('Hooks','WinPE-Builder','WIM-Manager','DiskSelector','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
+    foreach ($m in @('Hooks','WinPE-Builder','WIM-Manager','DiskSelector','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
         try {
             Import-DeployModule $m
             if ($Resume) { Add-Content $bootTrace "  Module charge : $m" -EA SilentlyContinue }
@@ -1020,6 +1042,31 @@ try {
     if ($Resume) {
         Write-Step "Phase 2 : post-deploiement (Windows demarre)"
         Write-Host ""
+
+        # VERROU anti-double-instance par FICHIER (le mutex Global\ est refuse en
+        # compte SYSTEM -> 'acces refuse'). Un fichier lock avec le PID + l'heure
+        # suffit : si un lock recent (<120s) existe et que son process tourne
+        # encore, cette instance se termine. Sinon on prend le lock.
+        $lockFile = 'C:\Deploy\Logs\.resume-lock'
+        $lockDir = Split-Path $lockFile -Parent
+        if (-not (Test-Path $lockDir -EA SilentlyContinue)) { New-Item -ItemType Directory $lockDir -Force -EA SilentlyContinue | Out-Null }
+        $takeLock = $true
+        if (Test-Path $lockFile -EA SilentlyContinue) {
+            try {
+                $lockData = Get-Content $lockFile -Raw -EA SilentlyContinue
+                $lockPid = ($lockData -split '\|')[0]
+                $lockTime = [datetime]($lockData -split '\|')[1]
+                $ageSec = ((Get-Date) - $lockTime).TotalSeconds
+                $stillRunning = $false
+                if ($lockPid) { $stillRunning = [bool](Get-Process -Id ([int]$lockPid) -EA SilentlyContinue) }
+                if ($ageSec -lt 120 -and $stillRunning) { $takeLock = $false }
+            } catch { $takeLock = $true }
+        }
+        if (-not $takeLock) {
+            Write-Info "Une autre instance de reprise est deja active -- celle-ci se termine."
+            return
+        }
+        try { Set-Content -Path $lockFile -Value "$PID|$(Get-Date -Format 'o')" -Force -EA SilentlyContinue } catch {}
 
         # Detecter un MARQUEUR de step en cours : s'il existe, c'est qu'on a
         # redemarre PENDANT un step (reboot prevu, ou plantage). On l'affiche
@@ -1096,59 +1143,56 @@ try {
         # On garde TOUT l'ordonnancement : reboots (RebootAfter), conditions,
         # reprise (state + RunOnce), ContinueOnError.
         Import-DeployModule 'PostInstall'
-        $SequencePath = ''
 
-        # 1) Sequence deja copiee localement (choisie en WinPE) ?
-        if (Test-Path 'C:\Deploy\Runtime\sequence.psd1' -EA SilentlyContinue) {
-            $SequencePath = 'C:\Deploy\Runtime\sequence.psd1'
-            Write-OK "Sequence locale (choisie au deploiement) : $SequencePath"
+        # ===== FLUX UNIFIE (refonte) : Resolver -> Engine =====
+        # Quelle que soit l'origine (locale / by-name / by-mac / _default), on
+        # resout UNE sequence et on la copie en local. Apres ca, TOUT est pareil.
+        $seqShare = Get-Cfg 'SequencesPath'
+        if (-not $seqShare) { $seqShare = "$NetworkShare\Sequences" }
+        $SequencePath = Resolve-DeploySequence -SequencesDir $seqShare
+
+        # Contexte partage fourni aux handlers (logger, config, secrets, logs).
+        $engineCtx = @{
+            LogsDir   = 'C:\Deploy\Logs'
+            GetConfig = { param($k) Get-Cfg $k }
+            GetSecret = { param($k) Get-Secret -Source vault -Key $k }
         }
 
-        # 2) Sinon, SCENARIO A : sequence affectee au poste par MAC sur le partage.
         if (-not $SequencePath) {
-            $seqShare = Get-Cfg 'SequencesPath'   # deja resolu (singleton)
-            if (-not $seqShare) { $seqShare = "$NetworkShare\Sequences" }
-            if (Get-Command Resolve-PostInstallSequence -EA SilentlyContinue) {
-                $resolved = Resolve-PostInstallSequence -SeqDir $seqShare
-                if ($resolved) {
-                    # Copier localement pour la reprise apres reboot
-                    New-Item -ItemType Directory 'C:\Deploy\Runtime' -Force -EA SilentlyContinue | Out-Null
-                    Copy-Item $resolved 'C:\Deploy\Runtime\sequence.psd1' -Force -EA SilentlyContinue
-                    $SequencePath = 'C:\Deploy\Runtime\sequence.psd1'
-                    Write-OK "Sequence affectee au poste (par MAC/defaut) : $resolved"
-                }
-            }
-        }
-
-        # 3) Sinon, SCENARIO B : rien de prevu -> assistant INTERACTIF.
-        # La phase 2 tourne ici en arriere-plan (sortie redirigee, fenetre cmd
-        # invisible). Un assistant qui pose des questions ne peut pas s'executer
-        # ici. On le lance dans une VRAIE fenetre PowerShell visible, qui fait
-        # TOUT (questions + creation + execution de la sequence).
-        $wizardHandledIt = $false
-        if (-not $SequencePath) {
+            # Aucune sequence affectee -> assistant INTERACTIF (fenetre visible).
             Write-Info "Aucune sequence affectee a ce poste."
-            Write-Info "Ouverture de l'assistant post-installation (fenetre dediee)..."
+            Write-Info "Ouverture de l'assistant post-installation..."
             $selfPath = $PSCommandPath
             if (-not $selfPath) { $selfPath = 'C:\Deploy\Scripts\Start-Deploy.ps1' }
-            # L'assistant (-PostInstallWizard) cree ET execute la sequence lui-meme.
             Start-Process powershell.exe -ArgumentList @(
                 '-NoProfile','-ExecutionPolicy','Bypass',
                 '-File', "`"$selfPath`"", '-PostInstallWizard'
             ) -Wait
-            $wizardHandledIt = $true
-        }
-
-        # Executer la sequence -- SAUF si l'assistant l'a deja fait (evite la
-        # double execution : une par l'assistant, une par ce processus parent).
-        if ($wizardHandledIt) {
-            Write-Info "Assistant post-installation termine (sequence deja executee)."
-        } elseif (-not $SequencePath) {
-            Write-Info "Aucune action post-installation. Termine."
         } else {
+            # MODE DEPLOIEMENT : autologon + tache de reprise armes UNE FOIS au
+            # debut (idempotent : re-arme a chaque reprise). C'est le marqueur
+            # 'deploiement en cours'. Desarme uniquement a la fin (done).
+            if (Get-Command Enable-DeploymentMode -EA SilentlyContinue) {
+                $adminPwd = $null
+                try { $adminPwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch {}
+                Enable-DeploymentMode -AdminPassword $adminPwd
+            }
             Write-OK "Sequence phase 2 : $SequencePath"
             Write-Host ""
-            Invoke-TaskSequence -SequencePath $SequencePath -Resume -PhaseFilter 'Windows'
+            # LE MOTEUR : deroule la sequence, dispatche, gere reboot/reprise.
+            $engResult = Invoke-Engine -SequencePath $SequencePath -Context $engineCtx -Resume -PhaseFilter 'Windows'
+            # Si le moteur a reboote, le process s'arrete avant ici. S'il revient,
+            # c'est que la sequence est terminee (ou en attente d'action).
+            if ($engResult -and $engResult.done) {
+                # Sequence terminee : basculer sur l'assistant pour permettre le
+                # nettoyage / la fin (qui desarmera le mode deploiement).
+                $selfPath = $PSCommandPath
+                if (-not $selfPath) { $selfPath = 'C:\Deploy\Scripts\Start-Deploy.ps1' }
+                Start-Process powershell.exe -ArgumentList @(
+                    '-NoProfile','-ExecutionPolicy','Bypass',
+                    '-File', "`"$selfPath`"", '-PostInstallWizard'
+                ) -Wait
+            }
         }
 
         # Nettoyer les mecanismes de reprise (sequence finie -> ne pas reboucler) :
@@ -1160,7 +1204,7 @@ try {
             Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue
             Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue
             # Supprimer la tache de reprise
-            & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null
+            Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null
         } catch {}
 
         Write-Host ""

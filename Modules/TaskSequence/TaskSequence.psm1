@@ -553,12 +553,22 @@ function Enable-DeployResume {
     if (Test-IsWinPE) { return }
     try {
         $adminPwd = $null
-        try { $adminPwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch {}
+        try { $adminPwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch { Write-TSLog "Enable-DeployResume : lecture localAdminPassword echouee : $_" -Level WARN }
+        $autoOk = $false
         if ($adminPwd) {
-            Set-DeployAutologon -Username (Get-LocalAdminName) -Password $adminPwd | Out-Null
+            $adminUser = Get-LocalAdminName
+            Write-TSLog "Armement autologon (compte : $adminUser)..." -Level INFO
+            $autoOk = Set-DeployAutologon -Username $adminUser -Password $adminPwd
+            if (-not $autoOk) { Write-TSLog "Set-DeployAutologon a retourne faux -- repli sur tache SYSTEM." -Level WARN }
         } else {
-            Write-TSLog "localAdminPassword absent du vault -- autologon non arme (reprise par tache SYSTEM seulement)." -Level WARN
+            Write-TSLog "localAdminPassword absent du vault -- autologon non arme (repli tache SYSTEM)." -Level WARN
         }
+        # DEUX mecanismes EN MEME TEMPS (comportement eprouve) :
+        #  - autologon + RunOnce -> reprise en fenetre visible (si la session ouvre)
+        #  - tache planifiee SYSTEM -> filet FIABLE (se declenche au boot, toujours)
+        # Le RunOnce peut ne pas se declencher (consomme, timing), donc on GARDE
+        # la tache en filet. Le bug de double execution venait d'ailleurs (IndexOf),
+        # corrige. La tache et le RunOnce lancent le meme -Resume, idempotent.
         Set-DeployResumeTask | Out-Null
         Write-DeployResetScript   # filet de securite (script de desarmement)
     } catch { Write-TSLog "Enable-DeployResume : $_" -Level WARN }
@@ -581,7 +591,7 @@ try { Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinu
 $ro = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
 try { Remove-ItemProperty $ro -Name 'PSWinDeployResume' -Force -EA SilentlyContinue } catch {}
 try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
-try { schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
 Write-Host "Termine. L'autologon et la reprise sont desactives." -ForegroundColor Green
 Write-Host "Pour relancer l'assistant : C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard" -ForegroundColor Cyan
 Read-Host "Appuyez sur Entree pour fermer"
@@ -677,16 +687,26 @@ function Set-DeployResumeTask {
         # On n'utilise PAS $SequencePath (variable de module potentiellement vide
         # dans ce scope -> Split-Path plantait avec 'fichier introuvable').
         $seqArg = 'C:\Deploy\Runtime\sequence.psd1'
-        # Verifier que le script de reprise existe (sinon la tache serait inutile).
+        # Localiser le script de reprise (plusieurs emplacements possibles).
         if (-not (Test-Path $ResumeScript -EA SilentlyContinue)) {
-            Write-TSLog "Set-DeployResumeTask : script de reprise introuvable ($ResumeScript) -- tache non creee." -Level WARN
-            return $false
+            $alt = @('C:\Deploy\Scripts\Start-Deploy.ps1', 'C:\Deploy\Start-Deploy.ps1') |
+                   Where-Object { Test-Path $_ -EA SilentlyContinue } | Select-Object -First 1
+            if ($alt) { $ResumeScript = $alt }
+            else {
+                Write-TSLog "Set-DeployResumeTask : Start-Deploy.ps1 introuvable -- tache non creee (l'autologon prend le relais)." -Level WARN
+                return $false
+            }
         }
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         if (-not (Test-Path $psExe -EA SilentlyContinue)) { $psExe = 'powershell.exe' }
         # Utiliser l'API native Register-ScheduledTask : gere proprement les
         # arguments avec guillemets (schtasks /TR les cassait -> 'fichier introuvable').
-        $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$ResumeScript`" -Resume -SequencePath `"$seqArg`""
+        # La tache attend 45s avant de lancer -Resume : cela laisse l'AUTOLOGON
+        # (fenetre PowerShell visible) demarrer en PREMIER et prendre le verrou.
+        # La tache SYSTEM ne prend le relais QUE si l'autologon n'a pas demarre
+        # (compte admin desactive, pas de session). Ainsi on garde la fenetre
+        # visible quand c'est possible, et un filet fiable sinon.
+        $psArgs = "-NoProfile -ExecutionPolicy Bypass -Command `"Start-Sleep -Seconds 45; & '$ResumeScript' -Resume -SequencePath '$seqArg'`""
         try {
             Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue
         } catch {}
@@ -705,7 +725,7 @@ function Set-DeployResumeTask {
 
 function Remove-DeployResumeTask {
     <# .SYNOPSIS Supprime la tache de reprise (sequence terminee). #>
-    try { & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+    try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
 }
 
 function Set-DeployRunOnce {
@@ -826,9 +846,13 @@ function Invoke-DeployReboot {
             Write-TSLog "Autologon avec le compte admin local : $adminName" -Level INFO
             $autoOk = Set-DeployAutologon -Username $adminName -Password $adminPwd
         } else {
-            Write-TSLog "localAdminPassword absent du vault -- autologon non arme (reprise en tache SYSTEM)." -Level WARN
+            Write-TSLog "localAdminPassword absent du vault -- autologon non arme." -Level WARN
         }
-        # Filet : tache planifiee (marche meme sans autologon, en SYSTEM)
+        # DEUX mecanismes EN MEME TEMPS (comportement eprouve qui marchait) :
+        #  - autologon (fenetre visible) si l'admin a un mot de passe
+        #  - tache planifiee SYSTEM (filet fiable, se declenche au boot)
+        # Ils lancent le meme Start-Deploy -Resume (idempotent). Avoir les DEUX
+        # garantit la reprise meme si le RunOnce ne se declenche pas.
         $taskOk = Set-DeployResumeTask
         if (-not $autoOk -and -not $taskOk) { Set-DeployRunOnce }
     }
@@ -1086,7 +1110,7 @@ function Invoke-StepJoinDomain {
             $currentShort = ($currentDomain -split '\.')[0]
             if ($currentDomain -ieq $domain -or $currentShort -ieq $targetShort) {
                 Write-TSLog "Machine deja jointe au domaine '$currentDomain' -- step JoinDomain saute." -Level SUCCESS -StepId $Step.id
-                return @{ Success = $true; RebootRequired = $false }
+                return @{ Success = $true; RebootRequired = $false; Skipped = $true }
             } else {
                 Write-TSLog "Machine jointe a '$currentDomain' mais cible = '$domain' -- on continue." -Level WARN -StepId $Step.id
             }
@@ -1143,6 +1167,17 @@ function Invoke-StepJoinDomain {
 
     Add-Computer @addArgs -EA Stop
     Write-TSLog "Jonction domaine '$domain' reussie" -Level SUCCESS -StepId $Step.id
+    # Marqueur de double securite : la jonction est faite. Au prochain passage
+    # (rejeu eventuel), le step sera saute meme si PartOfDomain tarde a refleter
+    # la jonction (DNS/replication AD).
+    try {
+        $jm = Join-Path (Get-DeployRoot) 'Logs\.domain-joined'
+        $jmDir = Split-Path $jm -Parent
+        if (-not (Test-Path $jmDir -EA SilentlyContinue)) { New-Item -ItemType Directory $jmDir -Force -EA SilentlyContinue | Out-Null }
+        Set-Content -Path $jm -Value "$domain $(Get-Date -Format 'o')" -Encoding UTF8 -EA SilentlyContinue
+    } catch {}
+    # La jonction necessite un reboot : on le signale explicitement.
+    return @{ Success = $true; RebootRequired = $true }
 }
 
 function Test-IsWinPE {
@@ -1266,6 +1301,13 @@ function Invoke-StepInstallSoftware {
         $p = $obj.PSObject.Properties[$key]
         if ($p) { return $p.Value } else { return $null }
     }
+    # Option : forcer winget et NE PAS basculer sur choco (NoChoco / PreferWinget).
+    $noChoco = [bool](Get-StepParam $Step 'noChoco' -Default $false)
+    # Initialiser winget UNE fois (enregistre App Installer, verifie qu'il repond).
+    # Ainsi winget fonctionne en deploiement au lieu d'echouer (0xC0000135).
+    $wingetReady = $false
+    if (Get-Command Initialize-Winget -EA SilentlyContinue) { $wingetReady = Initialize-Winget }
+
     if ($catalogApps) {
         foreach ($app in @($catalogApps)) {
             $nm = & $gv $app 'Name'; if (-not $nm) { $nm = 'app' }
@@ -1298,9 +1340,12 @@ function Invoke-StepInstallSoftware {
                     Write-TSLog "  winget introuvable sur ce poste -- repli choco si dispo" -Level INFO -StepId $Step.id
                 }
             }
-            # 2) choco (si ChocoId declare) -- installer choco si absent
-            if (-not $ok -and $chocoId -and -not (Get-Command choco -EA SilentlyContinue)) { Install-Chocolatey | Out-Null }
-            if (-not $ok -and $chocoId -and (Get-Command choco -EA SilentlyContinue)) {
+            # 2) choco (si ChocoId declare et si choco autorise) -- installer si absent
+            if ($noChoco -and -not $ok -and $chocoId) {
+                Write-TSLog "  choco desactive (noChoco) -- $nm non installe via choco" -Level WARN -StepId $Step.id
+            }
+            if (-not $noChoco -and -not $ok -and $chocoId -and -not (Get-Command choco -EA SilentlyContinue)) { Install-Chocolatey | Out-Null }
+            if (-not $noChoco -and -not $ok -and $chocoId -and (Get-Command choco -EA SilentlyContinue)) {
                 try {
                     & choco install $chocoId -y --no-progress 2>&1 | Out-Null
                     if ($LASTEXITCODE -eq 0) { $ok = $true; Write-TSLog "  choco OK : $nm" -Level SUCCESS -StepId $Step.id }
@@ -1345,9 +1390,56 @@ function Invoke-StepInstallSoftware {
         return
     }
 
-    # Format simple 'apps' : liste de noms. CASCADE : winget -> choco -> exe/msi
-    # sur le partage Logiciels. On s'arrete a la 1ere methode qui REUSSIT.
+    # Format simple 'apps' : liste de NOMS. Pour chaque nom, on cherche d'abord
+    # ses details dans le CATALOGUE (CataloguePath du psd1) : ainsi on peut juste
+    # ecrire apps = @('Google Chrome') sans repeter WingetId/ChocoId/Installer.
+    # Si le nom n'est pas dans le catalogue, il est traite comme un WingetId direct.
     $apps = Get-StepParam $Step 'apps'
+    if ($apps) {
+        # Charger le catalogue (une fois) pour resoudre les noms -> objets riches.
+        $catalogIndex = @{}
+        try {
+            $catPath = $null
+            if (Get-Command Get-PSWinDeployConfig -EA SilentlyContinue) {
+                try { $catPath = Get-PSWinDeployConfig -Key 'CataloguePath' } catch {}
+            }
+            $catCandidates = @()
+            if ($catPath) {
+                if ($catPath -match '\.psd1$') { $catCandidates += $catPath }
+                else { $catCandidates += (Join-Path $catPath 'applications.psd1'); $catCandidates += (Join-Path $catPath 'catalogue.psd1') }
+            }
+            $catCandidates += 'C:\Deploy\Catalogue\applications.psd1'
+            foreach ($cc in $catCandidates) {
+                if ($cc -and (Test-Path $cc -EA SilentlyContinue)) {
+                    $catData = Import-PowerShellDataFile $cc -EA Stop
+                    $appList = if ($catData.Applications) { $catData.Applications } else { $catData }
+                    foreach ($ca in @($appList)) {
+                        $caName = & $gv $ca 'Name'
+                        if ($caName) { $catalogIndex["$caName".ToLower()] = $ca }
+                    }
+                    Write-TSLog "Catalogue charge pour resolution par nom : $($catalogIndex.Count) app(s)" -Level INFO -StepId $Step.id
+                    break
+                }
+            }
+        } catch { Write-TSLog "Lecture catalogue (resolution par nom) : $_" -Level DEBUG -StepId $Step.id }
+
+        # Si une app nommee est dans le catalogue -> on la traite via la cascade
+        # riche (comme catalogApps). Sinon -> WingetId direct (comportement actuel).
+        $resolvedFromCatalog = @()
+        $plainNames = @()
+        foreach ($app in @($apps)) {
+            $key = "$app".ToLower()
+            if ($catalogIndex.ContainsKey($key)) { $resolvedFromCatalog += $catalogIndex[$key] }
+            else { $plainNames += "$app" }
+        }
+        # Traiter les apps resolues du catalogue via le meme moteur que catalogApps
+        if ($resolvedFromCatalog.Count -gt 0) {
+            $subStep = [PSCustomObject]@{ id = $Step.id; params = @{ catalogApps = $resolvedFromCatalog; softwareShare = (Get-StepParam $Step 'softwareShare' -Default '') } }
+            Invoke-StepInstallSoftware -Step $subStep | Out-Null
+        }
+        # Continuer avec les noms non trouves (traites comme WingetId direct)
+        $apps = $plainNames
+    }
     if ($apps) {
         # Partage Logiciels (pour le repli exe/msi) : <serveur>\Logiciels
         $softwareShare = Get-StepParam $Step 'softwareShare' -Default ''
@@ -1474,8 +1566,12 @@ function Invoke-StepCleanup {
     if (-not (Test-Path $root)) { return @{ Success = $true } }
     # Desarmer la reprise (autologon + tache) et retirer le script de secours.
     if (Get-Command Disable-DeployResume -EA SilentlyContinue) { Disable-DeployResume }
-    try { & schtasks.exe /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+    try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
     try { Remove-Item "$env:PUBLIC\Desktop\Reset-PSWinDeploy.ps1" -Force -EA SilentlyContinue } catch {}
+    # Nettoyer les marqueurs internes (jonction, step en cours, passes MAJ)
+    foreach ($mk in @('.domain-joined','.current-step','.updates-passes')) {
+        try { Remove-Item (Join-Path $root "Logs\$mk") -Force -EA SilentlyContinue } catch {}
+    }
     # Elements a supprimer (sensibles ou inutiles apres deploiement)
     $toRemove = @('secrets.vault.psd1','secrets.vault','deploy-config.psd1','PSWinDeploy.psd1','state.psd1','Scripts','Modules','Runtime')
     foreach ($item in $toRemove) {
@@ -1516,6 +1612,50 @@ function Invoke-StepShowWizard {
     }
 }
 
+function Initialize-Winget {
+    <#
+    .SYNOPSIS Prepare winget pour qu'il fonctionne en deploiement : enregistre
+        le package App Installer pour l'utilisateur courant et verifie que winget
+        repond. Retourne $true si winget est utilisable.
+    .DESCRIPTION
+        Sur une image fraiche, le package Microsoft.DesktopAppInstaller est
+        provisionne mais pas toujours ENREGISTRE pour le compte courant, ce qui
+        fait echouer winget (0xC0000135 DLL introuvable). On l'enregistre, on
+        rafraichit le PATH, puis on teste 'winget --version'.
+    #>
+    # Deja fonctionnel ?
+    $wg = Resolve-WingetPath
+    if ($wg) {
+        try { $v = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { return $true } } catch {}
+    }
+    Write-TSLog "Initialisation de winget (enregistrement App Installer)..." -Level INFO
+    try {
+        # Enregistrer le package App Installer pour l'utilisateur courant
+        $pkg = Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -EA SilentlyContinue | Select-Object -First 1
+        if ($pkg) {
+            $manifest = Join-Path $pkg.InstallLocation 'AppXManifest.xml'
+            if (Test-Path $manifest -EA SilentlyContinue) {
+                Add-AppxPackage -DisableDevelopmentMode -Register $manifest -EA SilentlyContinue
+            }
+        } else {
+            # Tenter de provisionner depuis le package provisionne (machine)
+            $prov = Get-AppxProvisionedPackage -Online -EA SilentlyContinue | Where-Object { $_.DisplayName -eq 'Microsoft.DesktopAppInstaller' } | Select-Object -First 1
+            if ($prov) { Add-AppxPackage -Register $prov.InstallLocation -DisableDevelopmentMode -EA SilentlyContinue }
+        }
+        # Rafraichir le PATH
+        $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
+        Start-Sleep -Seconds 2
+        $wg = Resolve-WingetPath
+        if ($wg) {
+            try { $v = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { Write-TSLog "winget pret : $v" -Level SUCCESS; return $true } } catch {}
+        }
+        Write-TSLog "winget toujours indisponible apres initialisation." -Level WARN
+    } catch {
+        Write-TSLog "Initialisation winget echouee : $_" -Level WARN
+    }
+    return $false
+}
+
 function Resolve-WingetPath {
     <#
     .SYNOPSIS Retourne le chemin de winget.exe, meme s'il n'est pas dans le PATH.
@@ -1526,12 +1666,15 @@ function Resolve-WingetPath {
         Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*. Retourne le
         chemin utilisable, ou $null si introuvable.
     #>
-    # PRIORITE : si 'winget' est dans le PATH, l'utiliser TEL QUEL (comme en
-    # terminal interactif -- c'est ce qui marche). Retourner le nom simple
-    # 'winget' (pas le chemin complet) pour reproduire exactement la commande
-    # qui fonctionne quand on la tape soi-meme.
+    # PRIORITE 1 : 'winget' dans le PATH (alias d'execution utilisateur) -- c'est
+    # ce qui fonctionne en terminal. On le retourne tel quel.
     if (Get-Command winget -ErrorAction SilentlyContinue) { return 'winget' }
-    # Sinon SEULEMENT : chercher le vrai binaire hors PATH (la version recente)
+    # PRIORITE 2 : l'alias d'execution dans le profil utilisateur courant. C'est
+    # le bon point d'entree (le binaire brut WindowsApps echoue souvent : DLL
+    # introuvable / 0xC0000135).
+    $userAlias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
+    if (Test-Path $userAlias -EA SilentlyContinue) { return $userAlias }
+    # PRIORITE 3 (dernier recours) : le binaire brut hors PATH (la version recente)
     $base = Join-Path $env:ProgramFiles 'WindowsApps'
     if (Test-Path $base -EA SilentlyContinue) {
         $candidate = Get-ChildItem $base -Filter 'Microsoft.DesktopAppInstaller_*' -Directory -EA SilentlyContinue |
@@ -2152,35 +2295,58 @@ function Invoke-TaskSequence {
         $result = $resultRaw | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
         if (-not $result) { $result = @{ Success = $true; RebootRequired = $false } }
 
-        # Step termine (sans reboot) : retirer le marqueur "en cours". Si un reboot
+        # Helper : lire une cle de resultat, que $result soit un HASHTABLE
+        # (cas des handlers, @{...}) ou un PSCustomObject. Le test PSObject.Properties
+        # ne marche PAS de facon fiable sur un hashtable -> on teste .Contains d'abord.
+        $resGet = {
+            param($key)
+            if ($null -eq $result) { return $null }
+            if ($result -is [hashtable] -or $result -is [System.Collections.IDictionary]) {
+                if ($result.Contains($key)) { return $result[$key] } else { return $null }
+            }
+            $p = $result.PSObject.Properties[$key]
+            if ($p) { return $p.Value } else { return $null }
+        }
+        $stepSkipped   = [bool](& $resGet 'Skipped')
+        $stepRebootReq = (& $resGet 'RebootRequired')
+        $stepStayOn    = [bool](& $resGet 'StayOnStep')
+
+        # Step termine sans reboot : retirer le marqueur "en cours". Si un reboot
         # suit, on LAISSE le marqueur (il indique qu'on a redemarre pendant ce step).
-        if (-not ($result.RebootRequired)) {
+        $stepWillReboot = ($null -ne $stepRebootReq -and [bool]$stepRebootReq)
+        if (-not $stepWillReboot) {
             try { Remove-Item $markerFile -Force -EA SilentlyContinue } catch {}
         }
 
         # Gestion du reboot
         $rebootPolicy = if ($step.rebootAfter) { $step.rebootAfter } else { 'IfRequired' }
         $needReboot   = $false
-
+        # Un step SAUTE (Skipped) ne reboote jamais, meme si rebootAfter='Always'.
         switch ($rebootPolicy) {
-            'Always'      { $needReboot = $true }
-            'IfRequired'  { $needReboot = if ($result -and $result.RebootRequired -ne $null) { [bool]$result.RebootRequired } else { $false } }
+            'Always'      { $needReboot = -not $stepSkipped }
+            'IfRequired'  { $needReboot = if ($null -ne $stepRebootReq) { [bool]$stepRebootReq } else { $false } }
             'Never'       { $needReboot = $false }
         }
 
         if ($needReboot) {
-            # Trouver le step suivant
-            $currentIdx  = [array]::IndexOf($sequence.steps, $step)
-            $nextStep    = if ($currentIdx + 1 -lt @($sequence.steps).Count) {
-                               $sequence.steps[$currentIdx + 1]
-                           } else { $null }
+            # Trouver le step suivant PAR ID (et non par reference d'objet :
+            # le filtrage de phase recree les objets, donc IndexOf par reference
+            # retournait -1 -> nextStep = premier step -> JoinDomain rejoue en
+            # boucle + autologon re-arme. Bug corrige en cherchant l'ID).
+            $allSteps = @($sequence.steps)
+            $currentIdx = -1
+            for ($ii = 0; $ii -lt $allSteps.Count; $ii++) {
+                if ("$($allSteps[$ii].id)" -eq "$($step.id)") { $currentIdx = $ii; break }
+            }
+            $nextStep = if ($currentIdx -ge 0 -and ($currentIdx + 1) -lt $allSteps.Count) {
+                            $allSteps[$currentIdx + 1]
+                        } else { $null }
 
             # Si c'est un Reboot explicite avec continueAt, utiliser ca
             $continueAt = Get-StepParam $step 'continueAt'
             # StayOnStep : le step demande a etre REJOUE apres le reboot (ex:
             # InstallUpdates qui fait plusieurs passes jusqu'a 0 MAJ).
-            $stayOnStep = ($result -and $result.PSObject.Properties['StayOnStep'] -and $result.StayOnStep)
-            if ($stayOnStep) {
+            if ($stepStayOn) {
                 $state.nextStepId = $step.id   # rejouer le MEME step apres reboot
             } elseif ($step.type -eq 'Reboot' -and $continueAt) {
                 $state.nextStepId = $continueAt
@@ -2258,6 +2424,11 @@ function Invoke-TaskSequence {
         Remove-DeployState
         Remove-DeployRunOnce
         Remove-DeployResumeTask   # supprimer la tache de reprise (sinon relance a chaque boot)
+        # SEQUENCE TERMINEE : supprimer les marqueurs de progression (le step en
+        # cours n'a plus lieu d'etre, la sequence est finie). On garde les logs.
+        foreach ($mk in @('.current-step','.updates-passes')) {
+            try { Remove-Item (Join-Path (Get-DeployRoot) "Logs\$mk") -Force -EA SilentlyContinue } catch {}
+        }
         # Marqueur de fin pour la phase 2 (info a l'operateur)
         try {
             $doneFile = 'C:\Deploy\Logs\DEPLOYMENT-COMPLETE.txt'
@@ -2308,4 +2479,5 @@ Export-ModuleMember -Function @(
     'Write-DeployResetScript'
     'Remove-DeployResumeTask'
     'Install-Chocolatey'
+    'Initialize-Winget'
 )
