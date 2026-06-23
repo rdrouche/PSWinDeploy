@@ -240,6 +240,61 @@ function Invoke-StepHandler {
 # ===========================================================================
 #  Invoke-Engine -- LA BOUCLE PRINCIPALE
 # ===========================================================================
+function Send-DeployReport {
+    <#
+    .SYNOPSIS Envoie un rapport d'avancement (heartbeat) a l'API web, si une URL
+        d'API est configuree. Silencieux en cas d'echec (le deploiement continue
+        meme si l'API est injoignable). Permet le suivi temps reel + historique
+        dans l'interface web.
+    .PARAMETER Status   'running' | 'rebooting' | 'done' | 'error'
+    .PARAMETER Step     identifiant du step courant
+    .PARAMETER Percent  avancement 0-100
+    .PARAMETER Message  message court
+    .PARAMETER ApiUrl   URL de base de l'API (ex http://10.0.8.111:8080). Si vide,
+        on tente de la lire depuis C:\Deploy\Runtime\api-url.txt.
+    #>
+    param(
+        [string]$Status = 'running',
+        [string]$Step = '',
+        [int]$Percent = 0,
+        [string]$Message = '',
+        [string]$ApiUrl = ''
+    )
+    # Resoudre l'URL de l'API : parametre, sinon fichier depose au deploiement.
+    if (-not $ApiUrl) {
+        $urlFile = 'C:\Deploy\Runtime\api-url.txt'
+        if (Test-Path $urlFile -EA SilentlyContinue) {
+            try { $ApiUrl = (Get-Content $urlFile -Raw -EA SilentlyContinue).Trim() } catch {}
+        }
+    }
+    if (-not $ApiUrl) { return }   # pas d'API configuree -> on ne fait rien
+
+    try {
+        $mac = ''
+        try {
+            $a = Get-CimInstance Win32_NetworkAdapter -EA SilentlyContinue |
+                 Where-Object { $_.PhysicalAdapter -and $_.MACAddress -and $_.NetEnabled } |
+                 Select-Object -First 1
+            if ($a -and $a.MACAddress) { $mac = ($a.MACAddress -replace '[:-]', '').ToUpper() }
+        } catch {}
+
+        $body = @{
+            computerName = $env:COMPUTERNAME
+            mac          = $mac
+            status       = $Status
+            step         = $Step
+            percent      = $Percent
+            message      = $Message
+            timestamp    = (Get-Date -Format 'o')
+        } | ConvertTo-Json -Compress
+
+        $uri = "$($ApiUrl.TrimEnd('/'))/api/deploy/report"
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 5 -EA SilentlyContinue | Out-Null
+    } catch {
+        # Silencieux : l'API peut etre injoignable, le deploiement continue.
+    }
+}
+
 function Invoke-Engine {
     <#
     .SYNOPSIS Deroule une sequence : charge, boucle sur les steps, dispatche vers
@@ -311,6 +366,11 @@ function Invoke-Engine {
         } catch {}
         Write-EngineLog "[DEBUT] Step '$stepName'" 'STEP' $stepId
 
+        # Heartbeat vers l'API (suivi temps reel dans le web). Pourcentage =
+        # progression dans la liste des steps.
+        $pct = if ($stepsToRun.Count -gt 0) { [int](($idx / $stepsToRun.Count) * 100) } else { 0 }
+        Send-DeployReport -Status 'running' -Step $stepId -Percent $pct -Message $stepName
+
         # APPEL DU HANDLER (dispatch) -> contrat standard
         $result = Invoke-StepHandler -Step $step -Context $Context
 
@@ -354,6 +414,7 @@ function Invoke-Engine {
             Write-EngineLog "Reboot #$rebootCount -- reprise prevue au step '$nextId'" 'WARN'
             # L'autologon + la tache de reprise sont DEJA armes (mode deploiement
             # active au demarrage). On reboote simplement.
+            Send-DeployReport -Status 'rebooting' -Step $nextId -Message "Reboot avant $nextId"
             Write-EngineLog "=== REDEMARRAGE dans 5 secondes ===" 'WARN'
             Start-Sleep -Seconds 5
             Restart-Computer -Force
@@ -366,6 +427,7 @@ function Invoke-Engine {
     foreach ($mk in @('.current-step', '.updates-passes')) {
         try { Remove-Item (Join-Path $Context.LogsDir $mk) -Force -EA SilentlyContinue } catch {}
     }
+    Send-DeployReport -Status 'done' -Percent 100 -Message "Deploiement termine : $($sequence.Name)"
     Write-EngineLog "==============================================" 'SUCCESS'
     Write-EngineLog "  DEPLOIEMENT TERMINE : '$($sequence.Name)'" 'SUCCESS'
     Write-EngineLog "==============================================" 'SUCCESS'
@@ -374,6 +436,7 @@ function Invoke-Engine {
 
 Export-ModuleMember -Function @(
     'Invoke-Engine'
+    'Send-DeployReport'
     'Get-EngineState'
     'Save-EngineState'
     'Remove-EngineState'

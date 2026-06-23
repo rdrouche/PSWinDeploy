@@ -100,6 +100,24 @@ Start-PodeServer -Threads 2 {
     Import-DeployModule 'WIM-Manager'
     Import-DeployModule 'TaskSequence'
     Import-DeployModule 'DiskSelector'
+    Import-DeployModule 'PsdJson'      # conversion PSD1<->JSON
+    Import-DeployModule 'ApiLogic'     # logique metier API (alignee refonte)
+
+    # -- Initialiser la logique API avec les chemins de la config --
+    try {
+        $cfgApi = Import-PowerShellDataFile (Join-Path $using:ProjectRoot 'PSWinDeploy.psd1')
+        $resolveShare = {
+            param($v)
+            if ($v -is [hashtable]) { if ($v.ContainsKey('DNS')) { return $v['DNS'] } }
+            return $v
+        }
+        Initialize-ApiLogic -Config @{
+            ProjectRoot   = $using:ProjectRoot
+            SequencesPath = (& $resolveShare $cfgApi.SequencesPath)
+            DriverShare   = (& $resolveShare $cfgApi.DriverShare)
+            CataloguePath = (Join-Path $using:ProjectRoot 'Catalogue\applications.psd1')
+        }
+    } catch { Write-Host "Init ApiLogic : $_" -ForegroundColor Yellow }
 
     # =======================================================
     # ROUTES PROFILS
@@ -277,6 +295,118 @@ Start-PodeServer -Threads 2 {
                         } catch { $null }
                     } | Where-Object { $_ }
             Write-PodeJsonResponse -Value @{ success = $true; data = $seqs }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # =======================================================
+    # =======================================================
+    # ROUTES DRIVERS (listing des modeles)
+    # =======================================================
+    Add-PodeRoute -Method Get -Path '/api/drivers' -ScriptBlock {
+        try {
+            $drivers = Get-DriverModelList
+            Write-PodeJsonResponse -Value @{ success = $true; data = $drivers }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # =======================================================
+    # ROUTES SEQUENCES by-name / by-mac (generation)
+    # =======================================================
+    # POST /api/sequences/by-name/:name  -- corps = sequence (JSON)
+    Add-PodeRoute -Method Post -Path '/api/sequences/by-name/:name' -ScriptBlock {
+        try {
+            $name = $WebEvent.Parameters['name']
+            $seqJson = $WebEvent.Data | ConvertTo-Json -Depth 12
+            $seq = ConvertFrom-JsonToHashtable -Json $seqJson
+            $path = Save-SequenceByName -ComputerName $name -Sequence $seq
+            Write-PodeJsonResponse -Value @{ success = $true; path = $path }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # POST /api/sequences/by-mac/:mac  -- corps = sequence (JSON)
+    Add-PodeRoute -Method Post -Path '/api/sequences/by-mac/:mac' -ScriptBlock {
+        try {
+            $mac = $WebEvent.Parameters['mac']
+            $seqJson = $WebEvent.Data | ConvertTo-Json -Depth 12
+            $seq = ConvertFrom-JsonToHashtable -Json $seqJson
+            $path = Save-SequenceByMac -Mac $mac -Sequence $seq
+            Write-PodeJsonResponse -Value @{ success = $true; path = $path }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # GET /api/sequences/list  -- liste templates + by-name + by-mac
+    Add-PodeRoute -Method Get -Path '/api/sequences/list' -ScriptBlock {
+        try {
+            $list = Get-SequenceList
+            Write-PodeJsonResponse -Value @{ success = $true; data = $list }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # =======================================================
+    # ROUTES CATALOGUE (synchro JSON <-> PSD1)
+    # =======================================================
+    # PUT /api/catalogue  -- remplace le catalogue (corps = { apps: [...] })
+    Add-PodeRoute -Method Put -Path '/api/catalogue' -ScriptBlock {
+        try {
+            $appsJson = ($WebEvent.Data.apps) | ConvertTo-Json -Depth 10
+            $apps = ConvertFrom-JsonToHashtable -Json $appsJson
+            $path = Save-AppCatalogue -Apps $apps
+            Write-PodeJsonResponse -Value @{ success = $true; path = $path }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # =======================================================
+    # ROUTES SUIVI / HISTORIQUE des deploiements
+    # =======================================================
+    # POST /api/deploy/report  -- heartbeat envoye par un PC en cours de deploiement
+    # Corps : { computerName, mac, status, step, percent, message }
+    Add-PodeRoute -Method Post -Path '/api/deploy/report' -ScriptBlock {
+        try {
+            $report = @{}
+            foreach ($p in $WebEvent.Data.PSObject.Properties) { $report[$p.Name] = $p.Value }
+            $id = Write-DeployReport -Report $report
+            Write-PodeJsonResponse -Value @{ success = $true; id = $id }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # GET /api/deploy/current  -- liste des deploiements en cours (dernier etat)
+    Add-PodeRoute -Method Get -Path '/api/deploy/current' -ScriptBlock {
+        try {
+            $list = Get-DeployCurrentList
+            Write-PodeJsonResponse -Value @{ success = $true; data = $list }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # GET /api/deploy/history/:id  -- historique complet d'un PC
+    Add-PodeRoute -Method Get -Path '/api/deploy/history/:id' -ScriptBlock {
+        try {
+            $id = $WebEvent.Parameters['id']
+            $hist = Get-DeployHistory -Id $id
+            Write-PodeJsonResponse -Value @{ success = $true; data = $hist }
         } catch {
             Set-PodeResponseStatus -Code 500
             Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }

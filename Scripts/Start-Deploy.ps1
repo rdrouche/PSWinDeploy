@@ -47,11 +47,16 @@ param(
     [string]$ShareUser,        # Mode Plain : compte reseau (ex: DEPLOYSRV\svc-winpe)
     [string]$SharePassword,    # Mode Plain : mot de passe du compte
     [string]$VaultPassword,    # Modes Vault/Auto : mot de passe AES du vault WinPE
-    [string]$VaultPath = ''    # Chemin du vault injecte dans le WIM (ex: X:\Deploy\secrets.vault)
+    [string]$VaultPath = '',   # Chemin du vault injecte dans le WIM (ex: X:\Deploy\secrets.vault)
+    [switch]$DebugMode         # Affiche les infos de diagnostic ([diag]) -- aussi pilotable par config debugMode=$true
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -- Mode debug : affiche les diagnostics verbeux ([diag]) dans tous les modules.
+# Active par le switch -DebugMode OU par la cle 'debugMode' de la config.
+$Global:PSWDDebug = [bool]$DebugMode
 
 # -----------------------------------------------------------------------------
 # BOOTSTRAP -- Chemins et imports
@@ -275,17 +280,35 @@ function Invoke-ScratchWizard {
     }
 
     if ($osImages.Count -gt 0) {
-        Write-Host ""
+        # Construire les libelles (nom + taille) pour la GUI radio.
+        $imgLabels = @()
         for ($i = 0; $i -lt $osImages.Count; $i++) {
             $img  = $osImages[$i]
             $name = if ($img.Name)   { $img.Name }   else { $img.FileName }
             $size = if ($img.SizeGB) { "  ($($img.SizeGB) GB)" } else { '' }
-            Write-Host "  [$($i+1)] $name$size" -ForegroundColor White
+            $imgLabels += "$name$size"
         }
-        Write-Host ""
-        Write-Host "  [?]  Image [1] : " -ForegroundColor Yellow -NoNewline
-        $c = (Read-Host).Trim()
-        $idx = if ($c -match '^\d+$' -and [int]$c -ge 1 -and [int]$c -le $osImages.Count) { [int]$c - 1 } else { 0 }
+
+        $idx = -1
+        # GUI radio si disponible (fonction generique du module Hooks).
+        if (-not (Get-Command Show-PSWDRadioPicker -EA SilentlyContinue)) {
+            try { Import-DeployModule 'Hooks' } catch {}
+        }
+        if (Get-Command Show-PSWDRadioPicker -EA SilentlyContinue) {
+            $guiPick = Show-PSWDRadioPicker -Title 'Image Windows' -Prompt 'Choisissez le systeme d''exploitation a deployer :' -Labels $imgLabels
+            if ($null -ne $guiPick -and $guiPick -ge 0) { $idx = $guiPick }
+        }
+        # Repli console si GUI indisponible ou annulee.
+        if ($idx -lt 0) {
+            Write-Host ""
+            for ($i = 0; $i -lt $osImages.Count; $i++) {
+                Write-Host "  [$($i+1)] $($imgLabels[$i])" -ForegroundColor White
+            }
+            Write-Host ""
+            Write-Host "  [?]  Image [1] : " -ForegroundColor Yellow -NoNewline
+            $c = (Read-Host).Trim()
+            $idx = if ($c -match '^\d+$' -and [int]$c -ge 1 -and [int]$c -le $osImages.Count) { [int]$c - 1 } else { 0 }
+        }
         $img = $osImages[$idx]
 
         $selectedWim = if ($img.FullPath) { $img.FullPath }
@@ -960,6 +983,13 @@ try {
     }
     # Accesseur court : Get-Cfg 'DeployShare'
     function Get-Cfg { param([string]$Key) try { return (Get-PSWinDeployConfig -Key $Key) } catch { return $null } }
+
+    # Mode debug aussi pilotable par la config (debugMode=$true). Le switch
+    # -DebugMode a la priorite (deja applique). Sinon on lit la config.
+    if (-not $Global:PSWDDebug) {
+        try { $cfgDbg = Get-Cfg 'debugMode'; if ($cfgDbg) { $Global:PSWDDebug = [bool]$cfgDbg } } catch {}
+    }
+    if ($Global:PSWDDebug) { Write-Info "Mode debug actif (diagnostics verbeux)." }
 
     # Charger un eventuel profil de SURCHARGE GUI (Overrides\gui.ps1 dans Deploy).
     # S'il existe, il branche un provider UI (WinForms/WPF) et/ou des overrides.

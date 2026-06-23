@@ -3,6 +3,13 @@
     Version         = '0.6.9'
     ProjectName     = 'PSWinDeploy'
 
+    # -- Debug --------------------------------------------
+    # debugMode = $true affiche les informations de diagnostic detaillees
+    # ([diag]...) dans la console pendant le deploiement (scan drivers, retours
+    # de fonctions, etc.). Absent ou $false = sortie normale (recommande en prod).
+    # Peut aussi etre active ponctuellement par le switch -DebugMode de Start-Deploy.
+    debugMode       = $false
+
     # -- ADK / WinPE --------------------------------------
     # x86 retire depuis ADK 2004 -- amd64 et arm64 seulement
     AdkPath         = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'

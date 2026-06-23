@@ -173,7 +173,12 @@ function Get-PSWDUIProvider {
 # -- Fonctions UI utilisees par le coeur (delegent au provider ou console) ----
 
 function Request-PSWDString {
-    <# .SYNOPSIS Demande une chaine -- via GUI si provider, sinon console. #>
+    <#
+    .SYNOPSIS Demande une chaine de texte a l'operateur (GUI si provider, sinon console).
+    .PARAMETER Question  [string] Texte de la question affichee.
+    .PARAMETER Default   [string] Valeur par defaut si l'operateur valide sans saisir.
+    .OUTPUTS [string] La saisie de l'operateur, ou $Default si vide.
+    #>
     param([string]$Question, [string]$Default = '')
     if ($script:UIProvider -and $script:UIProvider.ContainsKey('AskString')) {
         return & $script:UIProvider.AskString $Question $Default
@@ -186,7 +191,12 @@ function Request-PSWDString {
 }
 
 function Request-PSWDYesNo {
-    <# .SYNOPSIS Demande oui/non -- via GUI si provider, sinon console. #>
+    <#
+    .SYNOPSIS Demande une confirmation oui/non (GUI si provider, sinon console).
+    .PARAMETER Question  [string] Texte de la question.
+    .PARAMETER Default   [bool]   Reponse par defaut ($true=oui) si validation a vide.
+    .OUTPUTS [bool] $true si oui, $false si non.
+    #>
     param([string]$Question, [bool]$Default = $true)
     if ($script:UIProvider -and $script:UIProvider.ContainsKey('AskYesNo')) {
         return [bool](& $script:UIProvider.AskYesNo $Question $Default)
@@ -199,7 +209,12 @@ function Request-PSWDYesNo {
 }
 
 function Request-PSWDSecret {
-    <# .SYNOPSIS Demande un secret masque -- via GUI si provider, sinon console. #>
+    <#
+    .SYNOPSIS Demande un secret (mot de passe) en saisie masquee (GUI si provider, sinon console).
+    .PARAMETER Question  [string] Texte de la question.
+    .OUTPUTS [string] Le secret saisi, en CLAIR (chaine simple). L'appelant est
+        responsable de le securiser/effacer apres usage.
+    #>
     param([string]$Question)
     if ($script:UIProvider -and $script:UIProvider.ContainsKey('AskSecret')) {
         return & $script:UIProvider.AskSecret $Question
@@ -210,7 +225,14 @@ function Request-PSWDSecret {
 }
 
 function Show-PSWDList {
-    <# .SYNOPSIS Affiche une liste a choix -- retourne l'index choisi (0-based). #>
+    <#
+    .SYNOPSIS Affiche une liste numerotee a choix unique (GUI si provider, sinon console).
+    .PARAMETER Title  [string]   Titre de la liste.
+    .PARAMETER Items  [string[]] Les libelles a afficher (1 par ligne).
+    .OUTPUTS [int] L'index choisi en base 0 (0 = premier item). Retourne 0 par
+        defaut si saisie invalide. (Pour une option "annuler", prevoir un item
+        dedie dans $Items et tester l'index retourne.)
+    #>
     param([string]$Title, [string[]]$Items)
     if ($script:UIProvider -and $script:UIProvider.ContainsKey('ShowList')) {
         return [int](& $script:UIProvider.ShowList $Title $Items)
@@ -304,7 +326,12 @@ function Show-PSWDMultiList {
 }
 
 function Write-PSWDNotify {
-    <# .SYNOPSIS Notifie un message -- via GUI si provider, sinon console + hook OnLog. #>
+    <#
+    .SYNOPSIS Notifie un message (GUI si provider, sinon console + declenche le hook OnLog).
+    .PARAMETER Message  [string] Le message a notifier.
+    .PARAMETER Level    [string] Niveau : INFO | SUCCESS | WARN | ERROR (defaut INFO).
+    .OUTPUTS Aucun (void). Effet de bord : affichage + hook OnLog.
+    #>
     param([string]$Message, [string]$Level = 'INFO')
     # Toujours declencher le hook OnLog (pour journalisation GUI)
     Invoke-PSWDHook -Event 'OnLog' -Context @{ Message = $Message; Level = $Level }
@@ -324,7 +351,12 @@ function Write-PSWDNotify {
 }
 
 function Write-PSWDProgress {
-    <# .SYNOPSIS Rapporte une progression -- via GUI si provider, sinon Write-Progress. #>
+    <#
+    .SYNOPSIS Rapporte une progression (GUI si provider, sinon Write-Progress natif).
+    .PARAMETER Percent   [int]    Pourcentage d'avancement, 0 a 100.
+    .PARAMETER Activity  [string] Libelle de l'activite en cours (defaut 'Deploiement').
+    .OUTPUTS Aucun (void). Effet de bord : barre de progression.
+    #>
     param([int]$Percent, [string]$Activity = 'Deploiement')
     Invoke-PSWDHook -Event 'OnProgress' -Context @{ Percent = $Percent; Activity = $Activity }
     if ($script:UIProvider -and $script:UIProvider.ContainsKey('Progress')) {
@@ -470,6 +502,128 @@ function Find-PSWDOverrideProfile {
     return $null
 }
 
+function Show-PSWDRadioPicker {
+    <#
+    .SYNOPSIS Fenetre GUI (WinForms) GENERIQUE a choix unique (boutons radio).
+        Reutilisable pour n'importe quelle selection (drivers, OS, editions...).
+    .DESCRIPTION
+        Affiche une option par bouton radio + boutons OK / Annuler. Le premier
+        item est coche par defaut. Option "aucun" ajoutee si -NoneLabel fourni.
+    .PARAMETER Title      [string]   Titre de la fenetre.
+    .PARAMETER Labels     [string[]] Les libelles, un par bouton radio.
+    .PARAMETER Prompt     [string]   Texte affiche au-dessus de la liste.
+    .PARAMETER NoneLabel  [string]   Si non vide, ajoute une option "aucun"
+                                     (qui retourne -1). Vide = pas d'option aucun.
+    .OUTPUTS [int] ou $null :
+        >= 0  : index choisi (base 0) dans $Labels.
+        -1    : l'operateur a annule OU choisi l'option "aucun".
+        $null : WinForms INDISPONIBLE (WinPE minimal). L'appelant DOIT alors
+                basculer sur un mode console. C'est la difference cle : -1 =
+                choix explicite de ne rien prendre, $null = GUI impossible.
+    #>
+    param(
+        [string]$Title = 'Selection',
+        [string[]]$Labels,
+        [string]$Prompt = 'Choisissez une option :',
+        [string]$NoneLabel = ''          # si non vide, ajoute une option "aucun" (-1)
+    )
+    $Labels = @($Labels)
+    if ($Global:PSWDDebug) { Write-Host "  [diag] GUI : $($Labels.Count) label(s) recu(s) : $($Labels -join ' | ')" -ForegroundColor DarkGray }
+    if (-not $Labels -or $Labels.Count -eq 0) { return -1 }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    } catch {
+        # WinForms indisponible -> signaler a l'appelant (bascule console)
+        if ($Global:PSWDDebug) { Write-Host "  [diag] WinForms indisponible -> bascule console." -ForegroundColor Yellow }
+        return $null
+    }
+
+    try {
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = $Title
+        $form.StartPosition = 'CenterScreen'
+        $form.TopMost = $true
+        $form.FormBorderStyle = 'FixedDialog'
+        $form.MaximizeBox = $false
+        $form.MinimizeBox = $false
+
+        $label = New-Object System.Windows.Forms.Label
+        $label.Text = $Prompt
+        $label.AutoSize = $true
+        $label.Location = New-Object System.Drawing.Point(15, 15)
+        $form.Controls.Add($label)
+
+        # Un RadioButton par dossier, dans un panel scrollable
+        $panel = New-Object System.Windows.Forms.Panel
+        $panel.Location = New-Object System.Drawing.Point(15, 45)
+        $panel.Size = New-Object System.Drawing.Size(460, 260)
+        $panel.AutoScroll = $true
+        $panel.BorderStyle = 'FixedSingle'
+        $form.Controls.Add($panel)
+
+        $radios = New-Object System.Collections.ArrayList
+        $y = 10
+        for ($i = 0; $i -lt $Labels.Count; $i++) {
+            $rb = New-Object System.Windows.Forms.RadioButton
+            $rb.Text = [string]$Labels[$i]
+            $rb.Location = New-Object System.Drawing.Point(10, $y)
+            $rb.AutoSize = $true
+            $rb.Tag = [string]$i      # index stocke en string (relu en int plus bas)
+            if ($i -eq 0) { $rb.Checked = $true }
+            $panel.Controls.Add($rb)
+            [void]$radios.Add($rb)
+            $y += 30
+        }
+
+        # Option "Aucun" (seulement si demandee)
+        if ($NoneLabel) {
+            $rbNone = New-Object System.Windows.Forms.RadioButton
+            $rbNone.Text = $NoneLabel
+            $rbNone.Location = New-Object System.Drawing.Point(10, $y)
+            $rbNone.AutoSize = $true
+            $rbNone.Tag = '-1'
+            $panel.Controls.Add($rbNone)
+            [void]$radios.Add($rbNone)
+        }
+
+        # Boutons OK / Annuler
+        $btnOK = New-Object System.Windows.Forms.Button
+        $btnOK.Text = 'OK'
+        $btnOK.Location = New-Object System.Drawing.Point(300, 320)
+        $btnOK.Size = New-Object System.Drawing.Size(85, 30)
+        $btnOK.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $form.Controls.Add($btnOK)
+        $form.AcceptButton = $btnOK
+
+        $btnCancel = New-Object System.Windows.Forms.Button
+        $btnCancel.Text = 'Annuler'
+        $btnCancel.Location = New-Object System.Drawing.Point(390, 320)
+        $btnCancel.Size = New-Object System.Drawing.Size(85, 30)
+        $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $form.Controls.Add($btnCancel)
+        $form.CancelButton = $btnCancel
+
+        $form.ClientSize = New-Object System.Drawing.Size(490, 365)
+
+        $result = $form.ShowDialog()
+        if ($result -ne [System.Windows.Forms.DialogResult]::OK) { return -1 }
+
+        $chosenIdx = -1
+        foreach ($rb in $radios) {
+            if ($rb.Checked) {
+                $tmp = 0
+                if ([int]::TryParse([string]$rb.Tag, [ref]$tmp)) { $chosenIdx = $tmp }
+                break
+            }
+        }
+        return $chosenIdx
+    } catch {
+        return $null
+    }
+}
+
 Export-ModuleMember -Function @(
     'Show-PSWDMultiList'
     'Register-PSWDHook'
@@ -483,6 +637,7 @@ Export-ModuleMember -Function @(
     'Request-PSWDYesNo'
     'Request-PSWDSecret'
     'Show-PSWDList'
+    'Show-PSWDRadioPicker'
     'Write-PSWDNotify'
     'Write-PSWDProgress'
     'Set-PSWDOverride'

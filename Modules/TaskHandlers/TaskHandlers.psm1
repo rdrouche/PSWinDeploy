@@ -23,6 +23,19 @@ function Get-Ctx {
     if ($p) { return $p.Value } else { return $null }
 }
 
+# --- Log fichier DETAILLE : capture tout (commandes, sorties, codes) dans un
+# fichier dedie, pour diagnostiquer sans polluer la console. Fichier :
+# C:\Deploy\Logs\install-detail.log
+function Write-TaskFileLog {
+    param([string]$Message, [string]$Category = 'INFO')
+    try {
+        $logDir = 'C:\Deploy\Logs'
+        if (-not (Test-Path $logDir)) { New-Item -ItemType Directory $logDir -Force -EA SilentlyContinue | Out-Null }
+        $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        Add-Content -Path (Join-Path $logDir 'install-detail.log') -Value "$stamp [$Category] $Message" -EA SilentlyContinue
+    } catch {}
+}
+
 # --- Logger : le moteur fournit un logger dans $Context.Log ; sinon Write-Host ---
 function Write-TaskLog {
     param([string]$Message, [string]$Level = 'INFO', $Context = $null, [string]$StepId = '')
@@ -191,19 +204,40 @@ function Invoke-TaskShowWizard {
 #  Outils winget / choco (internes)
 # ===========================================================================
 function Resolve-WingetExe {
-    # 1) 'winget' dans le PATH (alias d'execution) -- ce qui marche en terminal
+    <#
+    .SYNOPSIS Prepare l'environnement pour winget et retourne le NOM 'winget'
+        (PAS le chemin complet). C'est LE point cle : appeler 'winget' via le
+        PATH utilise l'alias d'execution (contexte MSIX correct), alors que
+        lancer le binaire par son chemin complet echoue souvent (0xC0000135).
+    .OUTPUTS [string] 'winget' si disponible/prepare, sinon $null.
+    #>
+
+    # 1) Deja resoluble par le PATH ? (alias d'execution present) -> on l'utilise.
     if (Get-Command winget -ErrorAction SilentlyContinue) { return 'winget' }
-    # 2) alias d'execution du profil utilisateur
-    $userAlias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
-    if (Test-Path $userAlias -EA SilentlyContinue) { return $userAlias }
-    # 3) binaire brut (dernier recours)
+
+    # 2) Ajouter le dossier WindowsApps utilisateur au PATH (alias par compte).
+    $userApps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+    if ((Test-Path $userApps -EA SilentlyContinue) -and ($env:Path -notlike "*$userApps*")) {
+        $env:Path = "$userApps;$env:Path"
+    }
+    if (Get-Command winget -ErrorAction SilentlyContinue) { return 'winget' }
+
+    # 3) Recherche RECURSIVE du winget.exe le plus recent dans Program Files\
+    #    WindowsApps, puis ajout de SON DOSSIER au PATH (methode de ton script).
+    #    On NE retourne PAS le chemin complet : on ajoute au PATH et on renvoie
+    #    le nom 'winget', pour passer par l'alias d'execution (contexte correct).
     $base = Join-Path $env:ProgramFiles 'WindowsApps'
     if (Test-Path $base -EA SilentlyContinue) {
-        $cand = Get-ChildItem $base -Filter 'Microsoft.DesktopAppInstaller_*' -Directory -EA SilentlyContinue |
-                Sort-Object Name -Descending | Select-Object -First 1
-        if ($cand) {
-            $exe = Join-Path $cand.FullName 'winget.exe'
-            if (Test-Path $exe -EA SilentlyContinue) { return $exe }
+        $wgExe = Get-ChildItem -Path $base -Filter 'winget.exe' -Recurse -EA SilentlyContinue |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($wgExe) {
+            if ($env:Path -notlike "*$($wgExe.DirectoryName)*") {
+                $env:Path += ";$($wgExe.DirectoryName)"
+            }
+            # Verifier que 'winget' (le nom) repond maintenant
+            if (Get-Command winget -ErrorAction SilentlyContinue) { return 'winget' }
+            # En dernier recours seulement, le chemin complet (peut echouer MSIX)
+            return $wgExe.FullName
         }
     }
     return $null
@@ -288,23 +322,80 @@ function Install-OneApp {
     $chocoId  = "$(Get-StepProperty $App 'ChocoId')"
     $installer= "$(Get-StepProperty $App 'Installer')"
     $insArgs  = "$(Get-StepProperty $App 'Args')"
+    $script   = "$(Get-StepProperty $App 'Script')"
     $ok = $false
 
     Write-TaskLog "Installation : $name" 'INFO' $Context
 
+    # 0) METHODE SCRIPT (UNIQUE et PRIORITAIRE) : si l'app definit 'Script', on
+    #    installe UNIQUEMENT via ce script .ps1 dedie -- pas de cascade winget/
+    #    choco/exe. Pour les installations complexes qui ne rentrent pas dans le
+    #    moule standard. Convention : exit 0 = succes, exit 3010 = succes + reboot.
+    #    Le chemin 'Script' accepte DEUX formes :
+    #      - chemin UNC/absolu complet : '\\IP\Logiciels\mon-app.ps1' (utilise tel quel)
+    #      - chemin relatif : 'installs\mon-app.ps1' (resolu sur le partage Logiciels)
+    if ($script) {
+        $scriptPath = $script
+        # Si le chemin n'existe pas tel quel ET qu'il est relatif (pas UNC/absolu),
+        # on le resout sur le partage Logiciels.
+        $isAbsolute = ($script -like '\\*') -or ($script -match '^[A-Za-z]:\\')
+        if (-not $isAbsolute -and $SoftwareShare -and -not (Test-Path $scriptPath -EA SilentlyContinue)) {
+            $scriptPath = Join-Path $SoftwareShare $script
+        }
+        if (-not (Test-Path $scriptPath -EA SilentlyContinue)) {
+            Write-TaskLog "  Script d'installation introuvable : $scriptPath" 'WARN' $Context
+            return $false
+        }
+        Write-TaskLog "  Installation par script dedie : $scriptPath" 'INFO' $Context
+        try {
+            $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $p = Start-Process $psExe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" $insArgs" -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+                Write-TaskLog "  Script OK : $name (code $($p.ExitCode))" 'SUCCESS' $Context
+                return $true
+            }
+            Write-TaskLog "  Script echec : $name (code $($p.ExitCode))" 'WARN' $Context
+            return $false
+        } catch {
+            Write-TaskLog "  Script erreur : $_" 'WARN' $Context
+            return $false
+        }
+    }
+
     # 1) winget
     if (-not $ok -and $wingetId -and $WingetReady) {
         $wg = Resolve-WingetExe
+        Write-TaskFileLog "=== APP: $name (wingetId=$wingetId) ===" 'WINGET'
+        Write-TaskFileLog "winget resolu = '$wg' ; PATH winget = $((Get-Command winget -EA SilentlyContinue).Source)" 'WINGET'
         if ($wg) {
+            # Verifier si DEJA installe (evite de reinstaller / gagne du temps).
+            try {
+                $listOut = & $wg list --id $wingetId --exact --accept-source-agreements 2>&1
+                Write-TaskFileLog "list code=$LASTEXITCODE out=$($listOut -join ' | ')" 'WINGET'
+                if ($LASTEXITCODE -eq 0 -and ($listOut | Select-String -Pattern $wingetId -Quiet)) {
+                    Write-TaskLog "  Deja installe (winget) : $name" 'SUCCESS' $Context
+                    return $true
+                }
+            } catch { Write-TaskFileLog "list exception: $_" 'WINGET' }
+
             Write-TaskLog "  Tentative winget : $wingetId" 'INFO' $Context
             try {
-                $out = & $wg install --id $wingetId --silent --accept-package-agreements --accept-source-agreements 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    $out = & $wg install --id $wingetId --scope machine --silent --accept-package-agreements --accept-source-agreements 2>&1
+                # Installation avec scope machine + source winget explicite.
+                Write-TaskFileLog "CMD: winget install --id $wingetId --exact --silent --accept-package-agreements --accept-source-agreements --scope machine --source winget" 'WINGET'
+                $out = & $wg install --id $wingetId --exact --silent --accept-package-agreements --accept-source-agreements --scope machine --source winget 2>&1
+                $code1 = $LASTEXITCODE
+                Write-TaskFileLog "install(scope machine) code=$code1 out=$($out -join ' | ')" 'WINGET'
+                if ($code1 -ne 0) {
+                    # Repli sans scope machine
+                    Write-TaskFileLog "CMD(repli): winget install --id $wingetId --exact --silent (sans scope)" 'WINGET'
+                    $out = & $wg install --id $wingetId --exact --silent --accept-package-agreements --accept-source-agreements 2>&1
+                    Write-TaskFileLog "install(repli) code=$LASTEXITCODE out=$($out -join ' | ')" 'WINGET'
                 }
                 if ($LASTEXITCODE -eq 0) { $ok = $true; Write-TaskLog "  winget OK : $name" 'SUCCESS' $Context }
-                else { Write-TaskLog "  winget echec (code $LASTEXITCODE) : $($out | Select-Object -Last 1)" 'WARN' $Context }
-            } catch { Write-TaskLog "  winget erreur : $_" 'WARN' $Context }
+                else { Write-TaskLog "  winget echec (code $LASTEXITCODE) -- voir install-detail.log" 'WARN' $Context }
+            } catch { Write-TaskLog "  winget erreur : $_" 'WARN' $Context; Write-TaskFileLog "install exception: $_" 'WINGET' }
+        } else {
+            Write-TaskFileLog "winget INTROUVABLE (Resolve-WingetExe a retourne null)" 'WINGET'
         }
     }
 
@@ -312,13 +403,24 @@ function Install-OneApp {
     if (-not $ok -and $chocoId -and $NoChoco) {
         Write-TaskLog "  choco desactive (noChoco) -- $name non installe via choco" 'WARN' $Context
     } elseif (-not $ok -and $chocoId) {
-        if (Install-ChocoEngine $Context) {
+        $chocoReady = Install-ChocoEngine $Context
+        Write-TaskFileLog "=== APP: $name (chocoId=$chocoId) chocoReady=$chocoReady ===" 'CHOCO'
+        Write-TaskFileLog "choco PATH = $((Get-Command choco -EA SilentlyContinue).Source)" 'CHOCO'
+        if ($chocoReady) {
             Write-TaskLog "  Tentative choco : $chocoId" 'INFO' $Context
             try {
-                & choco install $chocoId -y --no-progress 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) { $ok = $true; Write-TaskLog "  choco OK : $name" 'SUCCESS' $Context }
-                else { Write-TaskLog "  choco echec (code $LASTEXITCODE)" 'WARN' $Context }
-            } catch { Write-TaskLog "  choco erreur : $_" 'WARN' $Context }
+                Write-TaskFileLog "CMD: choco install $chocoId -y --no-progress" 'CHOCO'
+                $cout = & choco install $chocoId -y --no-progress 2>&1
+                Write-TaskFileLog "choco code=$LASTEXITCODE out=$($cout -join ' | ')" 'CHOCO'
+                # choco : 0 = OK, 3010 = OK + reboot, 1641 = OK + reboot
+                if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 3010 -or $LASTEXITCODE -eq 1641) {
+                    $ok = $true; Write-TaskLog "  choco OK : $name" 'SUCCESS' $Context
+                } else {
+                    Write-TaskLog "  choco echec (code $LASTEXITCODE) -- voir install-detail.log" 'WARN' $Context
+                }
+            } catch { Write-TaskLog "  choco erreur : $_" 'WARN' $Context; Write-TaskFileLog "choco exception: $_" 'CHOCO' }
+        } else {
+            Write-TaskFileLog "choco INDISPONIBLE (Install-ChocoEngine a echoue)" 'CHOCO'
         }
     }
 

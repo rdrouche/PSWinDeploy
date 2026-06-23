@@ -44,7 +44,9 @@ function Write-PILog {
 
 function Get-PrimaryMacAddress {
     <#
-    .SYNOPSIS Retourne la MAC de la carte active principale, format AA-BB-CC-DD-EE-FF.
+    .SYNOPSIS Retourne la MAC de la carte active principale, format AABBCCDDEEFF
+        (sans separateur, majuscules). Ce format DOIT etre identique a celui du
+        resolver (SequenceResolver) pour que les sequences by-mac soient trouvees.
     #>
     try {
         $adapters = Get-CimInstance Win32_NetworkAdapter -EA SilentlyContinue |
@@ -54,7 +56,8 @@ function Get-PrimaryMacAddress {
                 Where-Object { $_.MACAddress }
         }
         $mac = ($adapters | Select-Object -First 1).MACAddress
-        if ($mac) { return ($mac -replace ':', '-').ToUpper() }
+        # Format UNIFIE : retirer TOUT separateur (: ou -) et passer en majuscules.
+        if ($mac) { return ($mac -replace '[:-]', '').ToUpper() }
     } catch {}
     return $null
 }
@@ -270,12 +273,34 @@ function Select-TemplateSequence {
         Write-PILog "Aucun modele de sequence trouve dans $SeqDir" 'WARN'
         return $null
     }
-    $idx = Show-PSWDList -Title "Choisir un modele de sequence" -Items ($templates.BaseName)
+    # Selecteur GUI radio si disponible (meme fenetre que OS/Drivers), sinon liste.
+    $idx = -1
+    if (Get-Command Show-PSWDRadioPicker -EA SilentlyContinue) {
+        $pick = Show-PSWDRadioPicker -Title 'Sequence' -Prompt 'Choisissez une sequence existante :' -Labels ($templates.BaseName)
+        if ($null -ne $pick -and $pick -ge 0) { $idx = $pick }
+    }
+    if ($idx -lt 0) {
+        $idx = Show-PSWDList -Title "Choisir un modele de sequence" -Items ($templates.BaseName)
+    }
+    if ($idx -lt 0 -or $idx -ge $templates.Count) { return $null }
     $chosen = $templates[$idx].FullName
-    # Copier le modele en version unique par MAC (provisionnable par l'API plus tard)
-    $copy = New-PostInstallSequenceFromTemplate -TemplatePath $chosen -SeqDir $SeqDir
-    if ($copy) { return $copy }
-    return $chosen
+
+    # Copier la sequence choisie DIRECTEMENT EN LOCAL (Runtime). On ne la
+    # recopie PAS sur le serveur : elle y est deja, et le moteur travaille sur
+    # la copie locale C:\Deploy\Runtime\sequence.psd1. (La copie par MAC sur le
+    # serveur etait inutile pour une selection manuelle -- reservee a un futur
+    # provisioning par API.)
+    $localSeq = 'C:\Deploy\Runtime\sequence.psd1'
+    try {
+        $rtDir = Split-Path $localSeq -Parent
+        if (-not (Test-Path $rtDir)) { New-Item -ItemType Directory $rtDir -Force -EA SilentlyContinue | Out-Null }
+        Copy-Item $chosen $localSeq -Force -EA Stop
+        Write-PILog "Sequence copiee en local : $localSeq" 'OK'
+        return $localSeq
+    } catch {
+        Write-PILog "Copie locale echouee : $_ -- utilisation directe du modele." 'WARN'
+        return $chosen
+    }
 }
 
 function Build-SequenceInteractive {
