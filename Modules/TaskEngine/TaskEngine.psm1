@@ -204,15 +204,15 @@ function Invoke-StepHandler {
 
     # Table de correspondance Type -> fonction handler
     $map = @{
-        'JoinDomain'      = 'Invoke-Task-JoinDomain'
-        'InstallApps'     = 'Invoke-Task-InstallApps'
-        'InstallSoftware' = 'Invoke-Task-InstallApps'
-        'InstallUpdates'  = 'Invoke-Task-InstallUpdates'
-        'RunScript'       = 'Invoke-Task-RunScript'
-        'WaitForNetwork'  = 'Invoke-Task-WaitForNetwork'
-        'Reboot'          = 'Invoke-Task-Reboot'
-        'Cleanup'         = 'Invoke-Task-Cleanup'
-        'ShowWizard'      = 'Invoke-Task-ShowWizard'
+        'JoinDomain'      = 'Invoke-TaskJoinDomain'
+        'InstallApps'     = 'Invoke-TaskInstallApps'
+        'InstallSoftware' = 'Invoke-TaskInstallApps'
+        'InstallUpdates'  = 'Invoke-TaskInstallUpdates'
+        'RunScript'       = 'Invoke-TaskRunScript'
+        'WaitForNetwork'  = 'Invoke-TaskWaitForNetwork'
+        'Reboot'          = 'Invoke-TaskReboot'
+        'Cleanup'         = 'Invoke-TaskCleanup'
+        'ShowWizard'      = 'Invoke-TaskShowWizard'
     }
     $fn = $map[$type]
     if (-not $fn) {
@@ -251,8 +251,11 @@ function Invoke-Engine {
         [string]$PhaseFilter = 'Windows'
     )
     if (-not $Context) { $Context = @{} }
-    if (-not $Context.LogsDir) { $Context.LogsDir = $script:EngineLogs }
-    if (-not $Context.Log) { $Context.Log = { param($m,$l,$s) Write-EngineLog $m $l $s } }
+    # Acces hashtable SUR en StrictMode : tester ContainsKey avant d'acceder.
+    if (-not $Context.ContainsKey('LogsDir') -or -not $Context['LogsDir']) { $Context['LogsDir'] = $script:EngineLogs }
+    if (-not $Context.ContainsKey('Log')    -or -not $Context['Log'])    { $Context['Log'] = { param($m,$l,$s) Write-EngineLog $m $l $s } }
+    if (-not $Context.ContainsKey('GetConfig')) { $Context['GetConfig'] = $null }
+    if (-not $Context.ContainsKey('GetSecret')) { $Context['GetSecret'] = $null }
 
     if (-not (Test-Path $SequencePath -EA SilentlyContinue)) {
         Write-EngineLog "Sequence introuvable : $SequencePath" 'ERROR'

@@ -11,11 +11,24 @@
 
 Set-StrictMode -Version Latest
 
+# Helper : lire une cle d'un Context (hashtable) de facon SURE en StrictMode.
+# Retourne $null si la cle n'existe pas, au lieu de lever une erreur.
+function Get-Ctx {
+    param($Context, [string]$Key)
+    if ($null -eq $Context) { return $null }
+    if ($Context -is [hashtable] -or $Context -is [System.Collections.IDictionary]) {
+        if ($Context.ContainsKey($Key)) { return $Context[$Key] } else { return $null }
+    }
+    $p = $Context.PSObject.Properties[$Key]
+    if ($p) { return $p.Value } else { return $null }
+}
+
 # --- Logger : le moteur fournit un logger dans $Context.Log ; sinon Write-Host ---
 function Write-TaskLog {
     param([string]$Message, [string]$Level = 'INFO', $Context = $null, [string]$StepId = '')
-    if ($Context -and $Context.Log) {
-        & $Context.Log $Message $Level $StepId
+    $logCb = Get-Ctx $Context 'Log'
+    if ($logCb) {
+        & $logCb $Message $Level $StepId
         return
     }
     $color = switch ($Level) { 'SUCCESS' {'Green'} 'WARN' {'Yellow'} 'ERROR' {'Red'} 'STEP' {'Cyan'} default {'Gray'} }
@@ -25,7 +38,7 @@ function Write-TaskLog {
 # ===========================================================================
 #  JoinDomain -- jonction au domaine Active Directory (idempotente)
 # ===========================================================================
-function Invoke-Task-JoinDomain {
+function Invoke-TaskJoinDomain {
     param($Step, $Context)
 
     $domain  = Get-StepParam $Step 'domain'
@@ -33,11 +46,12 @@ function Invoke-Task-JoinDomain {
     $newName = Get-StepParam $Step 'newName'
 
     # Repli sur la config globale si les params du step sont vides.
-    if ([string]::IsNullOrWhiteSpace("$domain") -and $Context.GetConfig) {
-        try { $domain = & $Context.GetConfig 'DomainName' } catch {}
+    $gc = Get-Ctx $Context 'GetConfig'
+    if ([string]::IsNullOrWhiteSpace("$domain") -and $gc) {
+        try { $domain = & $gc 'DomainName' } catch {}
     }
-    if ([string]::IsNullOrWhiteSpace("$ou") -and $Context.GetConfig) {
-        try { $ou = & $Context.GetConfig 'DomainOU' } catch {}
+    if ([string]::IsNullOrWhiteSpace("$ou") -and $gc) {
+        try { $ou = & $gc 'DomainOU' } catch {}
     }
     if ([string]::IsNullOrWhiteSpace("$domain")) {
         return New-TaskResult -Success:$false -Message "JoinDomain : 'domain' obligatoire (step ou config DomainName)"
@@ -46,7 +60,8 @@ function Invoke-Task-JoinDomain {
     # IDEMPOTENCE (double securite) :
     #  1. marqueur fichier '.domain-joined' ecrit apres une jonction reussie
     #  2. verification Win32_ComputerSystem.PartOfDomain
-    $joinedMarker = Join-Path $Context.LogsDir '.domain-joined'
+    $logsDir = Get-Ctx $Context 'LogsDir'; if (-not $logsDir) { $logsDir = 'C:\Deploy\Logs' }
+    $joinedMarker = Join-Path $logsDir '.domain-joined'
     if (Test-Path $joinedMarker -EA SilentlyContinue) {
         Write-TaskLog "Jonction deja effectuee (marqueur present) -- step saute." 'SUCCESS' $Context $Step.id
         return New-TaskResult -Skipped -Message 'deja joint (marqueur)'
@@ -70,9 +85,10 @@ function Invoke-Task-JoinDomain {
 
     # Credentials de jonction depuis le vault.
     $userJ = $null; $passJ = $null
-    if ($Context.GetSecret) {
-        try { $userJ = & $Context.GetSecret 'domainJoinUser' } catch {}
-        try { $passJ = & $Context.GetSecret 'domainJoinPassword' } catch {}
+    $gs = Get-Ctx $Context 'GetSecret'
+    if ($gs) {
+        try { $userJ = & $gs 'domainJoinUser' } catch {}
+        try { $passJ = & $gs 'domainJoinPassword' } catch {}
     }
     if ([string]::IsNullOrWhiteSpace("$userJ") -or [string]::IsNullOrWhiteSpace("$passJ")) {
         # Pas de credentials : en session interactive on pourrait demander, mais
@@ -106,7 +122,7 @@ function Invoke-Task-JoinDomain {
 # ===========================================================================
 #  WaitForNetwork -- attendre que le reseau soit pret
 # ===========================================================================
-function Invoke-Task-WaitForNetwork {
+function Invoke-TaskWaitForNetwork {
     param($Step, $Context)
     $timeout = [int](Get-StepParam $Step 'timeoutSec' -Default 60)
     $target  = "$(Get-StepParam $Step 'target' -Default '')"
@@ -128,7 +144,7 @@ function Invoke-Task-WaitForNetwork {
 # ===========================================================================
 #  Reboot -- redemarrage explicite
 # ===========================================================================
-function Invoke-Task-Reboot {
+function Invoke-TaskReboot {
     param($Step, $Context)
     Write-TaskLog "Redemarrage demande par la sequence." 'INFO' $Context $Step.id
     return New-TaskResult -RebootRequired -Message 'reboot explicite'
@@ -137,7 +153,7 @@ function Invoke-Task-Reboot {
 # ===========================================================================
 #  Cleanup -- nettoyage de fin (supprime fichiers sensibles, garde Logs)
 # ===========================================================================
-function Invoke-Task-Cleanup {
+function Invoke-TaskCleanup {
     param($Step, $Context)
     $keepLogs = [bool](Get-StepParam $Step 'keepLogs' -Default $true)
     $root = 'C:\Deploy'
@@ -164,7 +180,7 @@ function Invoke-Task-Cleanup {
 # ===========================================================================
 #  ShowWizard -- lance l'assistant post-installation (fenetre visible)
 # ===========================================================================
-function Invoke-Task-ShowWizard {
+function Invoke-TaskShowWizard {
     param($Step, $Context)
     # Signale au flux appelant qu'il faut basculer sur l'assistant interactif.
     Write-TaskLog "Bascule vers l'assistant post-installation." 'INFO' $Context $Step.id
@@ -195,24 +211,51 @@ function Resolve-WingetExe {
 
 function Initialize-WingetEngine {
     param($Context)
+    # S'assurer d'abord que le dossier WindowsApps de l'UTILISATEUR COURANT est
+    # dans le PATH (c'est la que vit l'alias d'execution 'winget' qui fonctionne).
+    $userApps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+    if ((Test-Path $userApps -EA SilentlyContinue) -and ($env:Path -notlike "*$userApps*")) {
+        $env:Path = "$userApps;$env:Path"
+    }
+
     $wg = Resolve-WingetExe
     if ($wg) {
-        try { $null = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { return $true } } catch {}
+        try { $v0 = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { Write-TaskLog "winget deja pret ($wg) : $v0" 'SUCCESS' $Context; return $true } } catch {}
     }
-    Write-TaskLog "Initialisation de winget (enregistrement App Installer)..." 'INFO' $Context
+
+    Write-TaskLog "Initialisation de winget (enregistrement App Installer pour ce compte)..." 'INFO' $Context
     try {
+        # Enregistrer le package App Installer POUR LE COMPTE COURANT. L'alias
+        # d'execution winget est PAR UTILISATEUR : sur une session admin fraiche,
+        # il faut l'enregistrer sinon 'winget' n'existe pas / echoue (0xC0000135).
         $pkg = Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -EA SilentlyContinue | Select-Object -First 1
-        if ($pkg) {
+        if (-not $pkg) {
+            # Provisionne au niveau machine mais pas enregistre pour ce compte :
+            # on l'enregistre depuis le package provisionne.
+            $prov = Get-AppxPackage -AllUsers -Name 'Microsoft.DesktopAppInstaller' -EA SilentlyContinue | Select-Object -First 1
+            if ($prov) {
+                $manifest = Join-Path $prov.InstallLocation 'AppXManifest.xml'
+                if (Test-Path $manifest -EA SilentlyContinue) { Add-AppxPackage -DisableDevelopmentMode -Register $manifest -EA SilentlyContinue }
+            }
+        } else {
             $manifest = Join-Path $pkg.InstallLocation 'AppXManifest.xml'
             if (Test-Path $manifest -EA SilentlyContinue) { Add-AppxPackage -DisableDevelopmentMode -Register $manifest -EA SilentlyContinue }
         }
+
+        # Rafraichir le PATH (machine + user) et re-ajouter WindowsApps utilisateur
         $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
-        Start-Sleep -Seconds 2
+        if ((Test-Path $userApps -EA SilentlyContinue) -and ($env:Path -notlike "*$userApps*")) { $env:Path = "$userApps;$env:Path" }
+        Start-Sleep -Seconds 3
+
         $wg = Resolve-WingetExe
         if ($wg) {
-            try { $v = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { Write-TaskLog "winget pret : $v" 'SUCCESS' $Context; return $true } } catch {}
+            try { $v = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { Write-TaskLog "winget pret ($wg) : $v" 'SUCCESS' $Context; return $true } } catch {}
+            Write-TaskLog "winget trouve ($wg) mais ne repond pas (code $LASTEXITCODE)." 'WARN' $Context
+        } else {
+            Write-TaskLog "winget introuvable apres enregistrement." 'WARN' $Context
         }
     } catch { Write-TaskLog "Initialisation winget echouee : $_" 'WARN' $Context }
+    Write-TaskLog "winget indisponible -- repli sur choco pour les installations." 'WARN' $Context
     return $false
 }
 
@@ -304,7 +347,7 @@ function Install-OneApp {
 # ===========================================================================
 #  InstallApps (alias InstallSoftware)
 # ===========================================================================
-function Invoke-Task-InstallApps {
+function Invoke-TaskInstallApps {
     param($Step, $Context)
 
     $noChoco       = [bool](Get-StepParam $Step 'noChoco' -Default $false)
@@ -324,7 +367,8 @@ function Invoke-Task-InstallApps {
         $catalogIndex = @{}
         try {
             $catPath = $null
-            if ($Context.GetConfig) { try { $catPath = & $Context.GetConfig 'CataloguePath' } catch {} }
+            $gcfg = Get-Ctx $Context 'GetConfig'
+            if ($gcfg) { try { $catPath = & $gcfg 'CataloguePath' } catch {} }
             $cands = @()
             if ($catPath) {
                 if ($catPath -match '\.psd1$') { $cands += $catPath }
@@ -368,11 +412,12 @@ function Invoke-Task-InstallApps {
 # ===========================================================================
 #  InstallUpdates -- Windows Update (multi-passes, StayOnStep)
 # ===========================================================================
-function Invoke-Task-InstallUpdates {
+function Invoke-TaskInstallUpdates {
     param($Step, $Context)
 
     $maxPasses = [int](Get-StepParam $Step 'maxPasses' -Default 5)
-    $passFile = Join-Path $Context.LogsDir '.updates-passes'
+    $logsDir2 = Get-Ctx $Context 'LogsDir'; if (-not $logsDir2) { $logsDir2 = 'C:\Deploy\Logs' }
+    $passFile = Join-Path $logsDir2 '.updates-passes'
     $passCount = 0
     try { if (Test-Path $passFile -EA SilentlyContinue) { $passCount = [int](Get-Content $passFile -Raw -EA SilentlyContinue) } } catch {}
     if ($passCount -ge $maxPasses) {
@@ -421,7 +466,7 @@ function Invoke-Task-InstallUpdates {
         }
         # Pas de reboot : re-chercher immediatement (boucle interne)
         Write-TaskLog "Passe installee sans reboot -- nouvelle recherche..." 'INFO' $Context $Step.id
-        return (Invoke-Task-InstallUpdates -Step $Step -Context $Context)
+        return (Invoke-TaskInstallUpdates -Step $Step -Context $Context)
     } catch {
         return New-TaskResult -Success:$false -Message "Erreur MAJ : $_"
     }
@@ -430,7 +475,7 @@ function Invoke-Task-InstallUpdates {
 # ===========================================================================
 #  RunScript -- executer un script PowerShell (gere exit 3010 = reboot)
 # ===========================================================================
-function Invoke-Task-RunScript {
+function Invoke-TaskRunScript {
     param($Step, $Context)
     $scriptPath = "$(Get-StepParam $Step 'path')"
     $scriptArgs = "$(Get-StepParam $Step 'args' -Default '')"
@@ -457,18 +502,18 @@ function Invoke-Task-RunScript {
 }
 
 Export-ModuleMember -Function @(
-    'Invoke-Task-Cleanup'
-    'Invoke-Task-ShowWizard'
+    'Invoke-TaskCleanup'
+    'Invoke-TaskShowWizard'
     'Write-TaskLog'
-    'Invoke-Task-JoinDomain'
-    'Invoke-Task-WaitForNetwork'
-    'Invoke-Task-Reboot'
+    'Invoke-TaskJoinDomain'
+    'Invoke-TaskWaitForNetwork'
+    'Invoke-TaskReboot'
 
     'Resolve-WingetExe'
     'Initialize-WingetEngine'
     'Install-ChocoEngine'
     'Install-OneApp'
-    'Invoke-Task-InstallApps'
-    'Invoke-Task-InstallUpdates'
-    'Invoke-Task-RunScript'
+    'Invoke-TaskInstallApps'
+    'Invoke-TaskInstallUpdates'
+    'Invoke-TaskRunScript'
 )

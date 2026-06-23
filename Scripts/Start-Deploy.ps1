@@ -80,7 +80,9 @@ function Import-DeployModule {
     param([string]$Name)
     $modPath = Join-Path $ModulesRoot "$Name\$Name.psm1"
     if (Test-Path $modPath) {
-        Import-Module $modPath -Force -Global
+        # -DisableNameChecking : evite les warnings sur les verbes/noms non
+        # standard (ex: noms internes des handlers). Pas bloquant mais bruyant.
+        Import-Module $modPath -Force -Global -DisableNameChecking
     } else {
         Write-Warning "Module introuvable : $modPath"
     }
