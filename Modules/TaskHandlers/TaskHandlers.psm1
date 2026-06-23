@@ -501,7 +501,148 @@ function Invoke-TaskRunScript {
     }
 }
 
+# ===========================================================================
+#  CopyFiles -- copie de fichiers/dossiers
+# ===========================================================================
+function Invoke-TaskCopyFiles {
+    param($Step, $Context)
+    $source = "$(Get-StepParam $Step 'source')"
+    $dest   = "$(Get-StepParam $Step 'dest')"
+    if (-not $source -or -not $dest) {
+        return New-TaskResult -Success:$false -Message "CopyFiles : 'source' et 'dest' obligatoires"
+    }
+    if (-not (Test-Path $source -EA SilentlyContinue)) {
+        return New-TaskResult -Success:$false -Message "CopyFiles : source introuvable ($source)"
+    }
+    try {
+        $destParent = Split-Path $dest -Parent
+        if ($destParent -and -not (Test-Path $destParent -EA SilentlyContinue)) {
+            New-Item -ItemType Directory -Path $destParent -Force -EA SilentlyContinue | Out-Null
+        }
+        Copy-Item $source $dest -Recurse -Force -EA Stop
+        Write-TaskLog "Copie : $source -> $dest" 'SUCCESS' $Context $Step.id
+        return New-TaskResult -Message "copie OK"
+    } catch {
+        return New-TaskResult -Success:$false -Message "Erreur copie : $_"
+    }
+}
+
+# ===========================================================================
+#  SetRegistry -- ecrire une valeur de registre
+# ===========================================================================
+function Invoke-TaskSetRegistry {
+    param($Step, $Context)
+    $key   = "$(Get-StepParam $Step 'key')"     # ex: HKLM:\SOFTWARE\Corp\Param
+    $value = Get-StepParam $Step 'value'
+    $type  = "$(Get-StepParam $Step 'type' -Default 'String')"
+    if (-not $key) { return New-TaskResult -Success:$false -Message "SetRegistry : 'key' obligatoire" }
+    try {
+        $regPath = Split-Path $key -Parent
+        $regName = Split-Path $key -Leaf
+        if (-not (Test-Path $regPath -EA SilentlyContinue)) { New-Item -Path $regPath -Force -EA Stop | Out-Null }
+        Set-ItemProperty -Path $regPath -Name $regName -Value $value -Type $type -Force -EA Stop
+        Write-TaskLog "Registre : $key = $value" 'SUCCESS' $Context $Step.id
+        return New-TaskResult -Message "registre OK"
+    } catch {
+        return New-TaskResult -Success:$false -Message "Erreur registre : $_"
+    }
+}
+
+# ===========================================================================
+#  SetComputerName -- renommer la machine (reboot requis pour appliquer)
+# ===========================================================================
+function Invoke-TaskSetComputerName {
+    param($Step, $Context)
+    $newName = "$(Get-StepParam $Step 'name')"
+    if (-not $newName) { return New-TaskResult -Success:$false -Message "SetComputerName : 'name' obligatoire" }
+
+    # Idempotence : si la machine porte deja ce nom, ne rien faire.
+    if ("$env:COMPUTERNAME" -ieq $newName) {
+        Write-TaskLog "La machine s'appelle deja '$newName' -- step saute." 'SUCCESS' $Context $Step.id
+        return New-TaskResult -Skipped -Message "deja nomme $newName"
+    }
+    try {
+        Rename-Computer -NewName $newName -Force -EA Stop
+        Write-TaskLog "Machine renommee en '$newName' (effectif apres reboot)." 'SUCCESS' $Context $Step.id
+        return New-TaskResult -RebootRequired -Message "renomme $newName"
+    } catch {
+        return New-TaskResult -Success:$false -Message "Erreur renommage : $_"
+    }
+}
+
+# ===========================================================================
+#  SetLocale -- langue / clavier / fuseau (utile aussi en phase 2)
+# ===========================================================================
+function Invoke-TaskSetLocale {
+    param($Step, $Context)
+    $tz   = "$(Get-StepParam $Step 'timezone')"
+    $loc  = "$(Get-StepParam $Step 'locale')"
+    $changed = @()
+    try {
+        if ($tz) { Set-TimeZone -Id $tz -EA SilentlyContinue; $changed += "tz=$tz" }
+        if ($loc) {
+            try { Set-WinSystemLocale -SystemLocale $loc -EA SilentlyContinue; $changed += "locale=$loc" } catch {}
+            try { Set-Culture $loc -EA SilentlyContinue } catch {}
+        }
+        Write-TaskLog "Locale appliquee : $($changed -join ', ')" 'SUCCESS' $Context $Step.id
+        return New-TaskResult -Message "locale : $($changed -join ', ')"
+    } catch {
+        return New-TaskResult -Success:$false -Message "Erreur locale : $_"
+    }
+}
+
+# ===========================================================================
+#  InjectDrivers -- injecter les drivers d'un modele (phase 2, online)
+# ===========================================================================
+function Invoke-TaskInjectDrivers {
+    param($Step, $Context)
+    # Dossier modele : soit fourni en parametre, soit deduit du partage Drivers
+    # + nom de modele. Les sous-dossiers DEDANS n'ont pas d'importance (recursif).
+    $driverPath = "$(Get-StepParam $Step 'path')"
+    $model      = "$(Get-StepParam $Step 'model')"
+
+    if (-not $driverPath -and $model) {
+        # Construire depuis le partage Drivers (config DriverShare) + modele
+        $gcfg = Get-Ctx $Context 'GetConfig'
+        $base = ''
+        if ($gcfg) { try { $base = & $gcfg 'DriverShare' } catch {} }
+        if (-not $base) { $base = '\\SERVEUR\Drivers' }
+        $driverPath = Join-Path $base $model
+    }
+    if (-not $driverPath) {
+        return New-TaskResult -Success:$false -Message "InjectDrivers : 'path' ou 'model' requis"
+    }
+    if (-not (Test-Path $driverPath -EA SilentlyContinue)) {
+        return New-TaskResult -Success:$false -Message "InjectDrivers : dossier introuvable ($driverPath)"
+    }
+
+    $infCount = @(Get-ChildItem $driverPath -Filter '*.inf' -Recurse -EA SilentlyContinue).Count
+    Write-TaskLog "Injection drivers (online) depuis : $driverPath ($infCount .inf)" 'INFO' $Context $Step.id
+    if ($infCount -eq 0) {
+        return New-TaskResult -Message "aucun .inf dans $driverPath"
+    }
+    try {
+        # pnputil : installe tous les .inf du dossier (et sous-dossiers) sur le
+        # Windows EN LIGNE. /subdirs = recursif, /install = installe vraiment.
+        $out = & pnputil.exe /add-driver (Join-Path $driverPath '*.inf') /subdirs /install 2>&1
+        Write-TaskLog "pnputil termine (code $LASTEXITCODE)." 'INFO' $Context $Step.id
+        # pnputil peut demander un reboot pour certains drivers.
+        $needReboot = ($out | Select-String -Pattern 'reboot|redemarr' -Quiet)
+        if ($needReboot) {
+            return New-TaskResult -RebootRequired -Message "drivers injectes (reboot conseille)"
+        }
+        return New-TaskResult -Message "drivers injectes ($infCount .inf)"
+    } catch {
+        return New-TaskResult -Success:$false -Message "Erreur injection drivers : $_"
+    }
+}
+
 Export-ModuleMember -Function @(
+    'Invoke-TaskInjectDrivers'
+    'Invoke-TaskCopyFiles'
+    'Invoke-TaskSetRegistry'
+    'Invoke-TaskSetComputerName'
+    'Invoke-TaskSetLocale'
     'Invoke-TaskCleanup'
     'Invoke-TaskShowWizard'
     'Write-TaskLog'

@@ -251,7 +251,7 @@ function Invoke-ScratchWizard {
     if ($advancedMode) { Write-Info "Mode avance ACTIF (options de diagnostic disponibles)." }
 
     # ?? 1. IMAGE OS ?????????????????????????????????????????????????????????
-    Write-Step "Etape 1/5 -- Image Windows"
+    Write-Step "Etape 1/6 -- Image Windows"
     $selectedWim   = ''
     $selectedIndex = 1
     $imgSharePath  = if ((Get-Variable -Name 'ImageShare' -Scope Script -EA SilentlyContinue) -and $script:ImageShare) { $script:ImageShare } else { "$NetworkShare\Images" }
@@ -322,7 +322,7 @@ function Invoke-ScratchWizard {
     }
 
     # ?? 2. NOM MACHINE ???????????????????????????????????????????????????????
-    Write-Host ""; Write-Step "Etape 2/5 -- Identite"
+    Write-Host ""; Write-Step "Etape 2/6 -- Identite"
     Write-Host "  [i]  Laissez VIDE pour que Windows genere un nom aleatoire unique." -ForegroundColor DarkGray
     Write-Host "       (recommande pour deploiements multiples avec jonction AD)" -ForegroundColor DarkGray
     Write-Host "  [?]  Nom de la machine [auto] : " -ForegroundColor Yellow -NoNewline
@@ -343,7 +343,7 @@ function Invoke-ScratchWizard {
     $domainOU   = ''
 
     # ?? 4. CONFIG ?????????????????????????????????????????????????????????????
-    Write-Host ""; Write-Step "Etape 4/5 -- Configuration"
+    Write-Host ""; Write-Step "Etape 4/6 -- Configuration"
     # Les mises a jour Windows sont desormais gerees par les scripts PostDeploy
     # (Scripts\PostDeploy\10-windows-update.ps1), executes en phase 2. Plus
     # besoin de le demander ici.
@@ -412,7 +412,35 @@ function Invoke-ScratchWizard {
         if ($advNoRunOnce)    { Write-Warn "Set-DeployRunOnce DESACTIVE (diagnostic) -- pas de manip ruche offline" }
     }
 
-    Write-Host ""; Write-Step "Etape 5/5 -- Disque cible"
+    # ?? ETAPE 5 : DRIVERS (selection AVANT le deploiement, pour ne pas attendre) ??
+    Write-Host ""; Write-Step "Etape 5/6 -- Drivers (optionnel)"
+    $driverModelPath = ''
+    # Charger DriverManager si besoin
+    if (-not (Get-Command Select-DriverModel -EA SilentlyContinue)) {
+        try { Import-DeployModule 'DriverManager' } catch {}
+    }
+    if (Get-Command Select-DriverModel -EA SilentlyContinue) {
+        $drvRoot = Get-Cfg 'DriverShare'
+        # DriverShare peut etre un @{DNS;IP} -> resoudre en chemin string reel.
+        if ($drvRoot -is [hashtable]) {
+            if (Get-Command Resolve-Share -EA SilentlyContinue) { $drvRoot = Resolve-Share $drvRoot }
+            elseif ($drvRoot.ContainsKey('DNS')) { $drvRoot = $drvRoot['DNS'] }
+        }
+        if (-not $drvRoot) { $drvRoot = "$NetworkShare\Drivers" }
+        Write-Info "Partage drivers utilise : $drvRoot"
+        if (Test-Path $drvRoot -EA SilentlyContinue) {
+            Write-Info "Selectionnez les drivers du modele a injecter (ou aucun)."
+            $driverModelPath = Select-DriverModel -DriversRoot $drvRoot
+            if ($driverModelPath) { Write-OK "Drivers selectionnes : $(Split-Path $driverModelPath -Leaf)" }
+            else { Write-Info "Aucun driver modele -- seuls les drivers inbox seront utilises." }
+        } else {
+            Write-Info "Partage drivers inaccessible ($drvRoot) -- etape ignoree."
+        }
+    } else {
+        Write-Info "Module DriverManager indisponible -- etape ignoree."
+    }
+
+    Write-Host ""; Write-Step "Etape 6/6 -- Disque cible"
     Show-DiskSummary | Out-Null
     $diskNum = Select-TargetDisk
 
@@ -434,6 +462,9 @@ function Invoke-ScratchWizard {
         if ($advNoCopyDeploy) { $advTxt += 'sans copy-deploy' }
         if ($advNoRunOnce)    { $advTxt += 'sans runonce' }
         Write-Host "  AVANCE  : $($advTxt -join ', ')" -ForegroundColor Yellow
+    }
+    if ($driverModelPath) {
+        Write-Host "  Drivers : $(Split-Path $driverModelPath -Leaf)" -ForegroundColor White
     }
     Write-Host "  Disque  : $diskNum  [SERA EFFACE]" -ForegroundColor Red
     Write-Host ""
@@ -704,9 +735,13 @@ function Invoke-ScratchWizard {
             Write-Warn "Pas d'IP fallback : si le DNS ne resout pas en phase 2, l'acces au partage echouera."
         }
 
+        # Drivers : le modele a DEJA ete choisi a l'etape 5 (avant le disque).
+        # On le passe directement -> pas de demande au milieu du deploiement.
+        # NoDriverPrompt empeche SimpleDeploy de redemander.
         Invoke-SimpleDeploy -WimPath $selectedWim -Index $selectedIndex -DiskNumber $diskNum `
             -UnattendParams $uParams -CopyDeploy:(-not $advNoCopyDeploy) -NoReboot:$advNoReboot `
-            -ModulesRoot $modulesDir -SequencePath $phase2Seq -DeployConfig $deployCfg
+            -ModulesRoot $modulesDir -SequencePath $phase2Seq -DeployConfig $deployCfg `
+            -DriverModelPath $driverModelPath -NoDriverPrompt
 
         # Retourner un marqueur : le flux principal ne doit PAS lancer la TaskSequence
         return 'SIMPLE-DONE'
@@ -845,17 +880,21 @@ function Select-SequenceFile {
     Write-Host "       La post-installation (apps, MAJ, scripts) se fait en phase 2" -ForegroundColor DarkGray
     Write-Host "       via les sequences (by-name / by-mac / _default) ou l'assistant." -ForegroundColor DarkGray
     Write-Host ""
+    Write-Host "  [D] Charger des drivers (depuis un 2e ISO / cle USB)" -ForegroundColor Cyan
+    Write-Host "      Si WinPE ne voit pas le disque (ex: VirtIO/Proxmox), chargez" -ForegroundColor DarkGray
+    Write-Host "      les drivers du disque AVANT de deployer." -ForegroundColor DarkGray
+    Write-Host ""
     Write-Host "  [C] Ligne de commande (shell PowerShell, partages montes)" -ForegroundColor DarkGray
     Write-Host "      Pour diagnostic, tests manuels, ou outils en ligne de commande" -ForegroundColor DarkGray
     Write-Host ""
 
     # En mode SIMPLE, la phase 1 ne deroule PAS de sequence (les sequences sont
-    # de la phase 2). On ne propose donc que l'assistant de deploiement [S] ou
-    # le shell [C]. Le choix de sequence a ete retire (n'avait plus de sens ici).
+    # de la phase 2). On propose : deploiement [S], chargement drivers [D], shell [C].
     while ($true) {
-        Write-Host "  Choix [S=Deploiement / C=Commande] : " -ForegroundColor Yellow -NoNewline
+        Write-Host "  Choix [S=Deploiement / D=Drivers / C=Commande] : " -ForegroundColor Yellow -NoNewline
         $sel = (Read-Host).Trim().ToUpper()
         if ($sel -eq 'S' -or $sel -eq '') { return 'SCRATCH' }
+        if ($sel -eq 'D') { return 'LOADDRIVERS' }
         if ($sel -eq 'C') { return 'SHELL' }
         Write-Warn "Choix invalide"
     }
@@ -1028,7 +1067,7 @@ try {
 
     # -- Import des modules locaux (dans le WIM) --
     Write-Step "Chargement des modules..."
-    foreach ($m in @('Hooks','WinPE-Builder','WIM-Manager','DiskSelector','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
+    foreach ($m in @('Hooks','WinPE-Builder','WIM-Manager','DiskSelector','DriverManager','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
         try {
             Import-DeployModule $m
             if ($Resume) { Add-Content $bootTrace "  Module charge : $m" -EA SilentlyContinue }
@@ -1249,6 +1288,57 @@ try {
         }
         Write-Step "Selection de la sequence de deploiement..."
         $SequencePath = Select-SequenceFile -SearchRoot $NetworkShare
+
+        # Option Charger des drivers : assistant qui charge les drivers d'un 2e
+        # ISO / cle USB DANS le WinPE en cours (utile si WinPE ne voit pas le
+        # disque, ex VirtIO/Proxmox). Puis retour au menu.
+        while ($SequencePath -eq 'LOADDRIVERS') {
+            try { Import-DeployModule 'DriverManager' } catch {}
+            $drvLoaded = $false
+            if (Get-Command Import-DriversFromMedia -EA SilentlyContinue) {
+                # Capturer le retour ; prendre le dernier element au cas ou des
+                # messages se glisseraient dans le flux de sortie.
+                $ret = @(Import-DriversFromMedia)
+                if ($ret.Count -gt 0) { $drvLoaded = [bool]$ret[-1] }
+            } else {
+                Write-Warn "Module DriverManager indisponible."
+            }
+            Write-Host ""
+            # Apres chargement de drivers (souvent reseau/stockage), il faut
+            # REINITIALISER le reseau pour que les nouveaux NIC soient pris en
+            # compte (sinon l'init reseau faite au demarrage ignore les drivers
+            # qu'on vient de charger). On propose de relancer l'init complete.
+            if ($drvLoaded) {
+                Write-OK "Drivers charges."
+                Write-Host "  Pour exploiter les nouveaux drivers (reseau/stockage), il est" -ForegroundColor Yellow
+                Write-Host "  recommande de reinitialiser le reseau et les partages." -ForegroundColor Yellow
+                Write-Host "  [R] Reinitialiser reseau + partages (recommande)" -ForegroundColor Cyan
+                Write-Host "  [M] Revenir au menu sans reinitialiser" -ForegroundColor DarkGray
+                Write-Host "  Choix [R/m] : " -ForegroundColor Yellow -NoNewline
+                $reinit = (Read-Host).Trim().ToUpper()
+                if ($reinit -ne 'M') {
+                    Write-Step "Reinitialisation reseau (prise en compte des nouveaux drivers)..."
+                    $netOk = Initialize-Network
+                    Write-Host ""
+                    if ($netOk) {
+                        Write-Step "Reconnexion aux partages de deploiement..."
+                        $deployServer = ''
+                        if ($NetworkShare -match '\\\\([^\\]+)\\') { $deployServer = $Matches[1] }
+                        $shareOk = Connect-DeployShares `
+                            -Server $deployServer -Mode $CredentialMode `
+                            -User $ShareUser -Pass $SharePassword -VaultPwd $VaultPassword
+                        if ($shareOk) { Write-OK "Partages reconnectes." }
+                        else { Write-Warn "Partages toujours inaccessibles." }
+                    } else {
+                        Write-Warn "Reseau toujours indisponible apres reinitialisation."
+                    }
+                    Write-Host ""
+                }
+            } else {
+                Read-Host "  Appuyez sur Entree pour revenir au menu"
+            }
+            $SequencePath = Select-SequenceFile -SearchRoot $NetworkShare
+        }
 
         # Option Ligne de commande : ouvrir un shell interactif, partages montes.
         # Pratique pour diagnostic, tests manuels (Test-Unattend-Complet.ps1...),

@@ -213,6 +213,11 @@ function Invoke-StepHandler {
         'Reboot'          = 'Invoke-TaskReboot'
         'Cleanup'         = 'Invoke-TaskCleanup'
         'ShowWizard'      = 'Invoke-TaskShowWizard'
+        'CopyFiles'       = 'Invoke-TaskCopyFiles'
+        'SetRegistry'     = 'Invoke-TaskSetRegistry'
+        'SetComputerName' = 'Invoke-TaskSetComputerName'
+        'SetLocale'       = 'Invoke-TaskSetLocale'
+        'InjectDrivers'   = 'Invoke-TaskInjectDrivers'
     }
     $fn = $map[$type]
     if (-not $fn) {

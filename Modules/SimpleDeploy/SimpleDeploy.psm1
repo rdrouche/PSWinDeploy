@@ -65,6 +65,9 @@ function Invoke-SimpleDeploy {
         [int]$DiskNumber = 0,
         [hashtable]$UnattendParams = @{},
         [switch]$CopyDeploy,
+        [string]$DriverModelPath,
+        [string]$DriverShare,
+        [switch]$NoDriverPrompt,
         [switch]$NoReboot,
         [string]$ModulesRoot = '',
         [string]$SequencePath = '',  # sequence a copier sur C:\Deploy\Runtime pour la phase 2
@@ -104,6 +107,61 @@ function Invoke-SimpleDeploy {
         throw "Application WIM echouee : Windows incomplet"
     }
     Write-SimpleLog "WIM applique (ntoskrnl.exe present)" 'OK'
+
+    # -- 2b. INJECTION DRIVERS (offline) --
+    # Selection d'un dossier modele sur \\srv\Drivers et injection sur l'image
+    # Windows OFFLINE (W:\) AVANT le 1er boot. Les sous-dossiers du modele n'ont
+    # pas d'importance (DISM /Recurse). Si DriverModelPath fourni, on l'utilise
+    # directement ; sinon on demande (sauf si pas de module/dossier).
+    if ($DriverModelPath) {
+        Write-SimpleLog "[2b/6] Injection drivers : $DriverModelPath" 'STEP'
+        # Charger DriverManager si besoin
+        if (-not (Get-Command Add-OfflineDrivers -EA SilentlyContinue)) {
+            foreach ($base in @('X:\Deploy\Modules','C:\Deploy\Modules', $ModulesRoot)) {
+                if (-not $base) { continue }
+                $p = Join-Path $base 'DriverManager\DriverManager.psm1'
+                if (Test-Path $p -EA SilentlyContinue) { try { Import-Module $p -Force -Global -DisableNameChecking } catch {}; break }
+            }
+        }
+        if (Get-Command Add-OfflineDrivers -EA SilentlyContinue) {
+            Add-OfflineDrivers -ImagePath 'W:\' -DriverPath $DriverModelPath | Out-Null
+        } else {
+            Write-SimpleLog "  Module DriverManager indisponible -- injection sautee." 'WARN'
+        }
+    } else {
+        Write-SimpleLog "[2b/6] Drivers : selection du modele a injecter..." 'STEP'
+        # Charger le module DriverManager si pas deja charge dans ce contexte.
+        if (-not (Get-Command Select-DriverModel -EA SilentlyContinue)) {
+            $dmPath = $null
+            foreach ($base in @('X:\Deploy\Modules','C:\Deploy\Modules', $ModulesRoot)) {
+                if (-not $base) { continue }
+                $p = Join-Path $base 'DriverManager\DriverManager.psm1'
+                if (Test-Path $p -EA SilentlyContinue) { $dmPath = $p; break }
+            }
+            if ($dmPath) {
+                try { Import-Module $dmPath -Force -Global -DisableNameChecking; Write-SimpleLog "  DriverManager charge : $dmPath" 'INFO' } catch { Write-SimpleLog "  DriverManager : $_" 'WARN' }
+            }
+        }
+        if (-not (Get-Command Select-DriverModel -EA SilentlyContinue)) {
+            Write-SimpleLog "  Module DriverManager indisponible -- pas d'injection de drivers." 'WARN'
+        } elseif ($NoDriverPrompt) {
+            Write-SimpleLog "  Selection drivers desactivee (NoDriverPrompt)." 'INFO'
+        } else {
+            $drvRoot = $DriverShare
+            if (-not $drvRoot) { $drvRoot = '\\SERVEUR\Drivers' }
+            Write-SimpleLog "  Partage drivers : $drvRoot" 'INFO'
+            if (Test-Path $drvRoot -EA SilentlyContinue) {
+                $chosen = Select-DriverModel -DriversRoot $drvRoot
+                if ($chosen) {
+                    Add-OfflineDrivers -ImagePath 'W:\' -DriverPath $chosen | Out-Null
+                } else {
+                    Write-SimpleLog "  Aucun driver modele injecte (choix utilisateur ou aucun dossier)." 'INFO'
+                }
+            } else {
+                Write-SimpleLog "  Partage drivers inaccessible ($drvRoot) -- injection sautee." 'WARN'
+            }
+        }
+    }
 
     # -- 3. Bootloader --
     Write-SimpleLog "[3/6] Bootloader (bcdboot)..." 'STEP'

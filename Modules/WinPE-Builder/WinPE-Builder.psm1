@@ -948,10 +948,34 @@ function Add-WinPEDrivers {
         [string]$NetPath,
         [string]$StoragePath,
         [string]$SysPath,
+        [string]$AllPath,
         [switch]$Force
     )
 
     Write-WinPELog "=== Injection drivers WinPE ===" -Level STEP
+
+    # MODE VRAC : si AllPath est fourni (ou si DriversRoot contient des .inf
+    # directement, sans sous-dossiers Net/Storage/Sys), on injecte TOUT le
+    # dossier en recursif. Ideal pour les drivers VirtIO/QEMU (Proxmox) ou
+    # tout pack de drivers non range par categorie.
+    if (-not $AllPath -and $DriversRoot -and (Test-Path $DriversRoot -EA SilentlyContinue)) {
+        $hasCatFolders = $false
+        foreach ($cat in @('Net','Storage','Sys')) {
+            if (Test-Path (Join-Path $DriversRoot $cat) -EA SilentlyContinue) { $hasCatFolders = $true; break }
+        }
+        $directInf = @(Get-ChildItem $DriversRoot -Filter '*.inf' -Recurse -EA SilentlyContinue)
+        if (-not $hasCatFolders -and $directInf.Count -gt 0) {
+            $AllPath = $DriversRoot
+            Write-WinPELog "  Dossier sans categories mais $($directInf.Count) .inf detecte(s) -> injection VRAC." -Level INFO
+        }
+    }
+    if ($AllPath -and (Test-Path $AllPath -EA SilentlyContinue)) {
+        $cnt = @(Get-ChildItem $AllPath -Filter '*.inf' -Recurse -EA SilentlyContinue).Count
+        Write-WinPELog "  Injection VRAC (recursif) depuis : $AllPath ($cnt .inf)" -Level INFO
+        Add-WinPEDriver -MountPath $MountPath -DriverPath $AllPath -Recurse
+        Write-WinPELog "Drivers injectes en vrac depuis $AllPath" -Level SUCCESS
+        return
+    }
 
     $injected = @()
     $skipped  = @()
