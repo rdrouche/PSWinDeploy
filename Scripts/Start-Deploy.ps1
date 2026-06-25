@@ -636,6 +636,13 @@ function Invoke-ScratchWizard {
         if (-not (Test-Path $sdMod)) { $sdMod = Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules\SimpleDeploy\SimpleDeploy.psm1' }
         Import-Module $sdMod -Force
 
+        # Charger TaskEngine pour Send-DeployReport (suivi P1 vers l'API web).
+        # Optionnel : si absent, le deploiement continue sans suivi.
+        try {
+            $teMod = Join-Path $modulesDir 'TaskEngine\TaskEngine.psm1'
+            if (Test-Path $teMod) { Import-Module $teMod -Force -EA SilentlyContinue }
+        } catch {}
+
         # Construire les parametres unattend (sauf si skip)
         $uParams = @{}
         if (-not $advSkipUnattend) {
@@ -758,6 +765,22 @@ function Invoke-ScratchWizard {
             Write-Warn "Pas d'IP fallback : si le DNS ne resout pas en phase 2, l'acces au partage echouera."
         }
 
+        # SUIVI P1 : signaler le demarrage du deploiement WinPE a l'API. Le
+        # reseau SMB est deja up (les images sont en partage), donc l'API est
+        # joignable. On construit l'URL depuis la config et on passe l'URL en
+        # parametre (pas de C:\Deploy\Runtime en P1). Silencieux si injoignable.
+        $p1ApiUrl = ''
+        try {
+            $p1Host = ''
+            if ($projCfg.ContainsKey('WinPEShareServerIP') -and $projCfg['WinPEShareServerIP']) { $p1Host = "$($projCfg['WinPEShareServerIP'])" }
+            elseif ($srvName) { $p1Host = $srvName }
+            $p1Port = if ($projCfg.ContainsKey('ApiPort') -and $projCfg['ApiPort']) { $projCfg['ApiPort'] } else { 8080 }
+            if ($p1Host) { $p1ApiUrl = "http://${p1Host}:${p1Port}" }
+        } catch {}
+        if ($p1ApiUrl -and (Get-Command Send-DeployReport -EA SilentlyContinue)) {
+            Send-DeployReport -ApiUrl $p1ApiUrl -Status 'running' -Step 'WinPE-Deploy' -Percent 10 -Message 'Phase 1 : preparation disque et application image'
+        }
+
         # Drivers : le modele a DEJA ete choisi a l'etape 5 (avant le disque).
         # On le passe directement -> pas de demande au milieu du deploiement.
         # NoDriverPrompt empeche SimpleDeploy de redemander.
@@ -765,6 +788,11 @@ function Invoke-ScratchWizard {
             -UnattendParams $uParams -CopyDeploy:(-not $advNoCopyDeploy) -NoReboot:$advNoReboot `
             -ModulesRoot $modulesDir -SequencePath $phase2Seq -DeployConfig $deployCfg `
             -DriverModelPath $driverModelPath -NoDriverPrompt
+
+        # SUIVI P1 : phase 1 terminee, on va rebooter vers Windows (P2).
+        if ($p1ApiUrl -and (Get-Command Send-DeployReport -EA SilentlyContinue)) {
+            Send-DeployReport -ApiUrl $p1ApiUrl -Status 'rebooting' -Step 'WinPE-Done' -Percent 50 -Message 'Phase 1 terminee : redemarrage vers Windows'
+        }
 
         # Retourner un marqueur : le flux principal ne doit PAS lancer la TaskSequence
         return 'SIMPLE-DONE'
@@ -1048,6 +1076,18 @@ try {
                         $apwd = $null
                         try { $apwd = Get-Secret -Source vault -Key 'localAdminPassword' } catch {}
                         Enable-DeploymentMode -AdminPassword $apwd
+                    }
+                    # SUIVI : deposer les coordonnees de l'API (URL + token) pour
+                    # que le moteur P2 envoie ses heartbeats. URL construite depuis
+                    # le serveur de partage + le port API (8080 par defaut).
+                    if (Get-Command Set-DeployApiEndpoint -EA SilentlyContinue) {
+                        $apiHost = Get-Cfg 'WinPEShareServerIP'
+                        if ([string]::IsNullOrWhiteSpace($apiHost)) { $apiHost = Get-Cfg 'WinPEShareServer' }
+                        $apiPort = Get-Cfg 'ApiPort'; if (-not $apiPort) { $apiPort = 8080 }
+                        $apiTok  = Get-Cfg 'apiToken'
+                        if ($apiHost) {
+                            Set-DeployApiEndpoint -ApiUrl "http://${apiHost}:${apiPort}" -ApiToken "$apiTok" -RuntimeDir 'C:\Deploy\Runtime'
+                        }
                     }
                     $ctxV = @{
                         LogsDir   = 'C:\Deploy\Logs'

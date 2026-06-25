@@ -11,3 +11,5 @@ services:
       PASSWORD_ADMIN_HASH: "${PASSWORD_ADMIN_HASH:?REQUIRED-HASH-PASSWORD}"      
       ADMIN_USER: "${ADMIN_USER:-admin}"      
       SESSION_TTL_HOURS: "${SESSION_TTL_HOURS:-12}"
+    volumes:
+      - ./pswd-data:/data

@@ -25,6 +25,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
+function New-RandomString {
+    param([int]$Length = 20)
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.ToCharArray()
+    # -Count avec Get-Random : tirage sans repetition, pas de boucle.
+    return -join (Get-Random -Count $Length -InputObject $chars)
+}
+
+# ---------------------------------------------------------------------------
 # HELPERS VISUELS
 # ---------------------------------------------------------------------------
 
@@ -452,6 +462,25 @@ foreach ($item in @('Profiles','Catalogue','Sequences')) {
     }
 }
 
+# Uniformisation du nom du catalogue : l'API (ApiPaths.CataloguePath) attend
+# 'catalogue.psd1'. Si la source fournit 'applications.psd1', on le renomme pour
+# rester coherent. On ne touche pas si catalogue.psd1 existe deja.
+$catDir  = "$InstallPath\Shares\Deploy\Catalogue"
+$catFile = Join-Path $catDir 'catalogue.psd1'
+$oldFile = Join-Path $catDir 'applications.psd1'
+if ((Test-Path $oldFile) -and -not (Test-Path $catFile)) {
+    Rename-Item -Path $oldFile -NewName 'catalogue.psd1' -Force -EA SilentlyContinue
+    Write-OK "Catalogue uniformise : applications.psd1 -> catalogue.psd1"
+} elseif (-not (Test-Path $catFile)) {
+    # Aucun catalogue fourni : creer un fichier vide valide pour eviter un
+    # catalogue introuvable cote API.
+    if (-not (Test-Path $catDir)) { New-Item -ItemType Directory $catDir -Force | Out-Null }
+    $emptyCat = "@{`r`n    Applications = @()`r`n}"
+    $utf8Bom2 = New-Object System.Text.UTF8Encoding $true
+    [System.IO.File]::WriteAllText($catFile, $emptyCat, $utf8Bom2)
+    Write-OK "Catalogue vide initialise : catalogue.psd1"
+}
+
 Write-OK "Fichiers copies"
 
 # -- Partages SMB -------------------------------------------------------------
@@ -552,6 +581,10 @@ $vaultPassComment = if ($vaultMode -eq 'AES') {
 }
 
 # Construction du psd1 par concatenation (pas de here-string pour eviter les problemes d'encodage)
+# Generation du token API (aleatoire). Il protege l'API et doit etre recopie
+# dans le conteneur web (TOKEN_API_PSWINDEPLOY).
+$apiToken = New-RandomString
+
 $psd1Lines = @(
     '@{'
     '    # Version'
@@ -609,6 +642,13 @@ $psd1Lines = @(
     '    # API'
     '    ApiPort         = 8080'
     "    ApiAllowedOrigin = '*'"
+    "    apiToken         = '$apiToken'"
+    '    ApiPaths = @{'
+    "       CataloguePath = '$InstallPath\Shares\Deploy\Catalogue\catalogue.psd1'"
+    "       SequencesPath = '$InstallPath\Shares\Deploy\Sequences'"
+    "       DriverShare   = '$InstallPath\Shares\Drivers'"
+    "       ScriptShare   = '$InstallPath\Shares\Scripts'"
+    '    }'
     ''
     '    # Chemins locaux (deploiement)'
     "    DeployRoot      = '$InstallPath\Deploy'"
@@ -666,9 +706,18 @@ if (-not $SkipVault) {
 
 # -- Web .env -----------------------------------------------------------------
 Write-Step "Configuration interface Web..."
-$envContent = "VITE_API_URL=http://${serverFQDN}:8080"
-[System.IO.File]::WriteAllText("$InstallPath\App\Web\.env", $envContent, [System.Text.Encoding]::UTF8)
-Write-OK "Web/.env configure"
+# Le conteneur web (BFF) utilise ces variables. Le mot de passe admin est a
+# generer via la page /hash de la console (PASSWORD_ADMIN_HASH).
+$envLines = @(
+    "URL_API_PSWINDEPLOY=http://${serverFQDN}:8080"
+    "TOKEN_API_PSWINDEPLOY=$apiToken"
+    "ADMIN_USER=admin"
+    "# Genere le hash sur http://<hote-conteneur>:8088/hash puis colle-le ici :"
+    "PASSWORD_ADMIN_HASH="
+    "SESSION_TTL_HOURS=12"
+)
+[System.IO.File]::WriteAllText("$InstallPath\App\Web\.env", ($envLines -join "`r`n"), [System.Text.Encoding]::UTF8)
+Write-OK "Web/.env configure (URL API + token pre-remplis)"
 
 # -- Module Pode --------------------------------------------------------------
 Write-Step "Verification de Pode (API REST)..."
@@ -717,7 +766,7 @@ $apiScript = @(
     '# Start-API.ps1 -- Lance l''API REST PSWinDeploy'
     '#Requires -Version 5.1'
     "Set-Location '$InstallPath\App'"
-    "pwsh -NonInteractive -File '$InstallPath\App\API\Deploy-API.ps1' -Port 8080"
+    "powershell -NonInteractive -File '$InstallPath\App\API\Deploy-API.ps1' -Port 8080"
 )
 [System.IO.File]::WriteAllText(
     "$InstallPath\Start-API.ps1",
@@ -819,11 +868,17 @@ Write-Host "  0. Debloquer les scripts (si telechargement depuis Internet) :" -F
     Write-Host "  3. Demarrer l'API :" -ForegroundColor Cyan
 Write-Host "     $InstallPath\Start-API.ps1" -ForegroundColor Gray
 Write-Host ""
-    Write-Host "  4. Interface Web -- a deployer sur un serveur Linux :" -ForegroundColor Cyan
-    Write-Host "     Copier App/Web/ sur le serveur Linux, creer .env puis :" -ForegroundColor Gray
-    Write-Host "       echo VITE_API_URL=http://${serverFQDN}:8080 > .env" -ForegroundColor Gray
-    Write-Host "       docker-compose up -d" -ForegroundColor Gray
-    Write-Host "     Ouvrir depuis le reseau : http://IP-LINUX:3000" -ForegroundColor Gray
+    Write-Host "  4. Interface Web (conteneur Docker) -- a deployer sur un hote Linux :" -ForegroundColor Cyan
+    Write-Host "     Build/push l'image puis, avec le docker-compose fourni dans App/Web/ :" -ForegroundColor Gray
+    Write-Host "       docker compose up -d" -ForegroundColor Gray
+    Write-Host "     Variables (deja pre-remplies dans App/Web/.env) :" -ForegroundColor Gray
+    Write-Host "       URL_API_PSWINDEPLOY   = http://${serverFQDN}:8080" -ForegroundColor DarkGray
+    Write-Host "       TOKEN_API_PSWINDEPLOY = $apiToken" -ForegroundColor DarkGray
+    Write-Host "       PASSWORD_ADMIN_HASH   = genere-le sur http://<hote>:8088/hash" -ForegroundColor DarkGray
+    Write-Host "     Console accessible : http://<hote-conteneur>:8088" -ForegroundColor Gray
+Write-Host ""
+    Write-Host "  IMPORTANT -- Token API genere : $apiToken" -ForegroundColor Yellow
+    Write-Host "     (identique dans PSWinDeploy.psd1 et le .env du conteneur)" -ForegroundColor DarkGray
 Write-Host ""
 
 if ($errors.Count -eq 0) {

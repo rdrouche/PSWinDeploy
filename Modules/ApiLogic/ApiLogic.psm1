@@ -14,7 +14,7 @@ $script:ApiConfig = @{
     ProjectRoot   = ''
     SequencesPath = ''     # \\srv\Deploy\Sequences
     DriverShare   = ''     # \\srv\Drivers
-    CataloguePath = ''     # \\srv\...\applications.psd1 ou local
+    CataloguePath = ''     # \\srv\...\catalogue.psd1 ou local
     ScriptShare   = ''     # \\srv\Scripts (scripts de sequence)
     HistoryPath   = ''     # dossier d'historique des deploiements
 }
@@ -79,7 +79,7 @@ function Initialize-ApiLogicFromProject {
     $drvShare = & $resolvePath 'DriverShare'   ''
     $scrShare = & $resolvePath 'ScriptShare'   ''
     # Catalogue : priorite ApiPaths, sinon config CataloguePath (UNC), sinon local.
-    $catPath  = & $resolvePath 'CataloguePath' (Join-Path $ProjectRoot 'Catalogue\applications.psd1')
+    $catPath  = & $resolvePath 'CataloguePath' (Join-Path $ProjectRoot 'Catalogue\catalogue.psd1')
 
     Initialize-ApiLogic -Config @{
         ProjectRoot   = $ProjectRoot
@@ -114,7 +114,7 @@ function Read-TextFileSafe {
 function Get-CataloguePath {
     <# .SYNOPSIS Retourne le chemin du catalogue actuellement resolu (diagnostic). #>
     $path = $script:ApiConfig.CataloguePath
-    if (-not $path) { $path = Join-Path $script:ApiConfig.ProjectRoot 'Catalogue\applications.psd1' }
+    if (-not $path) { $path = Join-Path $script:ApiConfig.ProjectRoot 'Catalogue\catalogue.psd1' }
     return $path
 }
 
@@ -134,7 +134,7 @@ function Save-AppCatalogue {
         directement. Ainsi le format reste celui que le deploiement attend. #>
     param([Parameter(Mandatory)]$Apps)
     $path = $script:ApiConfig.CataloguePath
-    if (-not $path) { $path = Join-Path $script:ApiConfig.ProjectRoot 'Catalogue\applications.psd1' }
+    if (-not $path) { $path = Join-Path $script:ApiConfig.ProjectRoot 'Catalogue\catalogue.psd1' }
 
     # Determiner la structure existante pour la conserver.
     $wrapInApplications = $true   # defaut : @{ Applications = @(...) }
@@ -480,6 +480,84 @@ function Get-DeployCurrentList {
     return $result
 }
 
+function Get-DeployCompleted {
+    <# .SYNOPSIS Parcourt l'historique et retourne la liste des deploiements
+        TERMINES avec leur duree (du 1er au dernier evenement). Un deploiement
+        est considere termine si son historique contient un evenement 'done'. #>
+    $dir = $script:ApiConfig.HistoryPath
+    $result = @()
+    if (-not $dir -or -not (Test-Path $dir -EA SilentlyContinue)) { return $result }
+
+    foreach ($f in @(Get-ChildItem $dir -Filter 'history-*.jsonl' -EA SilentlyContinue)) {
+        $events = @()
+        foreach ($line in @(Get-Content -LiteralPath $f.FullName -EA SilentlyContinue)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try { $events += ($line | ConvertFrom-Json) } catch {}
+        }
+        if ($events.Count -eq 0) { continue }
+
+        $done = $events | Where-Object { "$($_.status)" -eq 'done' } | Select-Object -First 1
+        $first = $events[0]
+        $last  = $events[-1]
+        $start = $null; $end = $null
+        try { $start = [datetime]::Parse($first.timestamp) } catch {}
+        try { $end   = [datetime]::Parse($last.timestamp) } catch {}
+        $durationSec = $null
+        if ($start -and $end) { $durationSec = [math]::Round(($end - $start).TotalSeconds) }
+
+        $result += [PSCustomObject]@{
+            Id           = $f.BaseName -replace '^history-', ''
+            ComputerName = "$($first.computerName)"
+            Mac          = "$($first.mac)"
+            Status       = if ($done) { 'done' } else { "$($last.status)" }
+            Completed    = [bool]$done
+            Start        = if ($start) { $start.ToString('o') } else { $null }
+            End          = if ($end) { $end.ToString('o') } else { $null }
+            DurationSec  = $durationSec
+            Events       = $events.Count
+        }
+    }
+    return $result
+}
+
+function Get-DeployStats {
+    <# .SYNOPSIS Agrege l'historique en statistiques : nombre de deploiements
+        termines aujourd'hui / semaine / mois / annee, et duree moyenne. #>
+    $all = @(Get-DeployCompleted) | Where-Object { $_.Completed }
+    $now = Get-Date
+    $today = $now.Date
+    $weekStart = $today.AddDays( - [int](([int]$today.DayOfWeek + 6) % 7) )  # lundi
+    $monthStart = Get-Date -Day 1 -Hour 0 -Minute 0 -Second 0
+    $yearStart  = Get-Date -Month 1 -Day 1 -Hour 0 -Minute 0 -Second 0
+
+    $cntDay = 0; $cntWeek = 0; $cntMonth = 0; $cntYear = 0; $cntTotal = 0
+    $durations = @()
+    foreach ($d in $all) {
+        $cntTotal++
+        if ($d.DurationSec -ne $null) { $durations += [double]$d.DurationSec }
+        $end = $null
+        try { $end = [datetime]::Parse($d.End) } catch { continue }
+        if ($end -ge $today)      { $cntDay++ }
+        if ($end -ge $weekStart)  { $cntWeek++ }
+        if ($end -ge $monthStart) { $cntMonth++ }
+        if ($end -ge $yearStart)  { $cntYear++ }
+    }
+    $avg = if ($durations.Count -gt 0) { [math]::Round(($durations | Measure-Object -Average).Average) } else { 0 }
+    $min = if ($durations.Count -gt 0) { [math]::Round(($durations | Measure-Object -Minimum).Minimum) } else { 0 }
+    $max = if ($durations.Count -gt 0) { [math]::Round(($durations | Measure-Object -Maximum).Maximum) } else { 0 }
+
+    return [PSCustomObject]@{
+        Today          = $cntDay
+        Week           = $cntWeek
+        Month          = $cntMonth
+        Year           = $cntYear
+        Total          = $cntTotal
+        AvgDurationSec = $avg
+        MinDurationSec = $min
+        MaxDurationSec = $max
+    }
+}
+
 function Get-DeployHistory {
     <# .SYNOPSIS Retourne l'historique d'un PC (liste d'evenements). #>
     param([Parameter(Mandatory)][string]$Id)
@@ -518,4 +596,6 @@ Export-ModuleMember -Function @(
     'Write-DeployReport'
     'Get-DeployCurrentList'
     'Get-DeployHistory'
+    'Get-DeployCompleted'
+    'Get-DeployStats'
 )

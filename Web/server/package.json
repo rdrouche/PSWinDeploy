@@ -3,12 +3,13 @@
   "version": "0.6.9",
   "private": true,
   "type": "module",
-  "description": "Backend For Frontend PSWinDeploy : auth admin + proxy securise vers l'API PowerShell.",
+  "description": "Backend For Frontend PSWinDeploy : auth admin + proxy securise + stats SQLite.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
+    "better-sqlite3": "^11.3.0",
     "cookie-parser": "^1.4.6",
     "express": "^4.19.2"
   }

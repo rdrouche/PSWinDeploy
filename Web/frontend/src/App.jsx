@@ -719,6 +719,138 @@ function SequenceListPage({ toast }) {
   )
 }
 
+// ─── Page : Statistiques ───────────────────────────────────
+function StatsPage({ toast }) {
+  const [stats, setStats] = useState(null)
+  const [completed, setCompleted] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState("")
+  const PAGE_SIZE = 25
+
+  const loadStats = useCallback(async () => {
+    const s = await api.deployStats()
+    if (s && s.success) setStats(s.data)
+    else toast((s && s.error) || "Stats indisponibles.", "err")
+  }, [toast])
+
+  const loadPage = useCallback(async (p) => {
+    setLoading(true)
+    const c = await api.deployCompleted(PAGE_SIZE, p * PAGE_SIZE)
+    setLoading(false)
+    if (c && c.success) { setCompleted(asArray(c.data)); setTotal(c.total || 0) }
+    else toast((c && c.error) || "Lecture impossible.", "err")
+  }, [toast])
+
+  useEffect(() => { loadStats() }, [loadStats])
+  useEffect(() => { loadPage(page) }, [loadPage, page])
+
+  async function removeOne(id) {
+    setBusy(id)
+    const r = await api.deleteDeployment(id)
+    setBusy("")
+    if (r && r.success) { toast("Suivi supprime."); loadPage(page); loadStats() }
+    else toast((r && r.error) || "Suppression impossible.", "err")
+  }
+
+  async function purge() {
+    const months = parseInt(window.prompt("Supprimer les deploiements termines plus vieux que combien de mois ?", "12"), 10)
+    if (!months || months <= 0) return
+    setBusy("purge")
+    const r = await api.purgeDeployments(months)
+    setBusy("")
+    if (r && r.success) { toast(`${r.purged} suivi(s) purge(s) (> ${r.months} mois).`); setPage(0); loadPage(0); loadStats() }
+    else toast((r && r.error) || "Purge impossible.", "err")
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const fmtDur = (sec) => {
+    if (sec == null) return "—"
+    const m = Math.floor(sec / 60), s = sec % 60
+    if (m === 0) return `${s}s`
+    return `${m}min ${String(s).padStart(2, "0")}s`
+  }
+  const fmtDate = (iso) => {
+    if (!iso) return "—"
+    try { return new Date(iso).toLocaleString() } catch { return iso }
+  }
+
+  return (
+    <div>
+      <div className="page-head">
+        <h1>Statistiques</h1>
+        <p>Bilan des deploiements termines : volumes par periode et durees.</p>
+      </div>
+
+      {loading ? <div className="panel"><div className="empty">Chargement...</div></div> : (
+        <>
+          <div className="stat-grid">
+            <div className="stat-card"><div className="stat-num">{stats?.Today ?? 0}</div><div className="stat-lbl">Aujourd'hui</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Week ?? 0}</div><div className="stat-lbl">Cette semaine</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Month ?? 0}</div><div className="stat-lbl">Ce mois</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Year ?? 0}</div><div className="stat-lbl">Cette annee</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Total ?? 0}</div><div className="stat-lbl">Total</div></div>
+          </div>
+
+          <div className="panel">
+            <h2>Durees</h2>
+            <div className="row wrap" style={{ gap: 30 }}>
+              <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Moyenne</div><div style={{ fontSize: 20, fontWeight: 600 }}>{fmtDur(stats?.AvgDurationSec)}</div></div>
+              <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Minimum</div><div style={{ fontSize: 20, fontWeight: 600, color: "var(--ok)" }}>{fmtDur(stats?.MinDurationSec)}</div></div>
+              <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Maximum</div><div style={{ fontSize: 20, fontWeight: 600, color: "var(--warn)" }}>{fmtDur(stats?.MaxDurationSec)}</div></div>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="row" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>Deploiements termines</h2>
+              <div className="spacer" />
+              <button className="btn ghost" onClick={purge} disabled={busy === "purge"}>{busy === "purge" ? "Purge..." : "Purger les anciens"}</button>
+              <button className="btn ghost" onClick={() => { loadPage(page); loadStats() }}>Rafraichir</button>
+            </div>
+            {completed.length === 0 ? (
+              <div className="empty"><p>Aucun deploiement termine{page > 0 ? " sur cette page" : ""}.</p></div>
+            ) : (
+              <>
+              <table>
+                <thead><tr><th>Machine</th><th>Debut</th><th>Fin</th><th>Duree</th><th>Etat</th><th></th></tr></thead>
+                <tbody>
+                  {completed.map((d, i) => (
+                    <tr key={d.Id || i}>
+                      <td><b>{d.ComputerName || d.Id}</b></td>
+                      <td style={{ fontSize: 12.5 }}>{fmtDate(d.Start)}</td>
+                      <td style={{ fontSize: 12.5 }}>{fmtDate(d.End)}</td>
+                      <td className="mono">{fmtDur(d.DurationSec)}</td>
+                      <td>{d.Completed ? <span className="badge ok">termine</span> : <span className="badge warn">{d.Status}</span>}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <button className="btn sm ghost" onClick={() => removeOne(d.Id)} disabled={busy === d.Id} title="Supprimer ce suivi">
+                          {busy === d.Id ? "..." : "Suppr."}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="row" style={{ marginTop: 14, alignItems: "center" }}>
+                <span style={{ color: "var(--text-dim)", fontSize: 12.5 }}>
+                  {total} deploiement(s) -- page {page + 1} / {totalPages}
+                </span>
+                <div className="spacer" />
+                <button className="btn sm ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0 || loading}>Precedent</button>
+                <button className="btn sm ghost" onClick={() => setPage(p => p + 1)} disabled={page + 1 >= totalPages || loading}>Suivant</button>
+              </div>
+              </>
+            )}
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Shell ─────────────────────────────────────────────────
 const PAGES = [
   { id: "editor", label: "Editeur", comp: SequencesPage },
@@ -727,6 +859,7 @@ const PAGES = [
   { id: "scripts", label: "Scripts", comp: ScriptsPage },
   { id: "drivers", label: "Drivers", comp: DriversPage },
   { id: "monitor", label: "Suivi", comp: MonitorPage },
+  { id: "stats", label: "Statistiques", comp: StatsPage },
 ]
 
 export default function App() {

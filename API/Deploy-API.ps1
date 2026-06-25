@@ -705,6 +705,30 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # GET /api/deploy/stats  -- statistiques agregees (J/S/M/A + durees)
+    Add-PodeRoute -Method Get -Path '/api/deploy/stats' -ScriptBlock {
+        try {
+            Initialize-ApiLogicFromProject -ProjectRoot (Get-PodeState -Name 'ProjectRoot')
+            $stats = Get-DeployStats
+            Write-PodeJsonResponse -Value @{ success = $true; data = $stats }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # GET /api/deploy/completed  -- liste des deploiements termines (avec durees)
+    Add-PodeRoute -Method Get -Path '/api/deploy/completed' -ScriptBlock {
+        try {
+            Initialize-ApiLogicFromProject -ProjectRoot (Get-PodeState -Name 'ProjectRoot')
+            $list = @(Get-DeployCompleted)
+            Write-PodeJsonResponse -Value @{ success = $true; data = $list }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
     # =======================================================
     # HEALTHCHECK
     # =======================================================

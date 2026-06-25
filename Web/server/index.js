@@ -28,6 +28,7 @@ import cookieParser from "cookie-parser"
 import crypto from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { initDb, upsertDeployments, computeStats, listCompleted, deleteDeployment, purgeOlderThan } from "./stats-db.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -43,6 +44,7 @@ const ADMIN_PASS = process.env.PASSWORD_ADMIN || ""
 const TTL_MS     = Number(process.env.SESSION_TTL_HOURS || 12) * 3600 * 1000
 const PORT       = Number(process.env.PORT || 3000)
 const STATIC_DIR = path.join(__dirname, "public")
+const SQLITE_PATH = process.env.SQLITE_PATH || "/data/pswd-stats.db"
 
 if (!API_URL)   console.warn("[bff] URL_API_PSWINDEPLOY non defini : les appels API echoueront.")
 if (!ADMIN_HASH && !ADMIN_PASS) console.warn("[bff] Aucun mot de passe admin configure (ni HASH ni clair) : le login refusera tout le monde.")
@@ -55,6 +57,58 @@ function purge() {
   for (const [id, s] of sessions) if (s.expiresAt < now) sessions.delete(id)
 }
 setInterval(purge, 3600 * 1000)
+
+// ─── SQLite (stats de deploiement, persistantes) ───────────
+const PURGE_MONTHS = Number(process.env.PURGE_MONTHS || 0)   // 0 = pas de purge auto
+try {
+  initDb(SQLITE_PATH)
+  console.log(`[bff] base stats : ${SQLITE_PATH}`)
+  // Purge auto au demarrage puis une fois par jour (si configuree).
+  if (PURGE_MONTHS > 0) {
+    const runPurge = () => {
+      try {
+        const n = purgeOlderThan(PURGE_MONTHS)
+        if (n > 0) console.log(`[bff] purge auto : ${n} deploiement(s) > ${PURGE_MONTHS} mois supprime(s)`)
+      } catch (e) { console.error(`[bff] purge auto KO : ${e?.message || e}`) }
+    }
+    runPurge()
+    setInterval(runPurge, 24 * 3600 * 1000)
+    console.log(`[bff] purge auto active : > ${PURGE_MONTHS} mois`)
+  }
+} catch (e) {
+  console.error(`[bff] init SQLite KO (${SQLITE_PATH}) : ${e?.message || e}`)
+}
+
+// Appel interne a l'API PowerShell (avec token), utilise par la sync.
+async function apiGet(pathname) {
+  if (!API_URL) throw new Error("URL_API_PSWINDEPLOY non defini")
+  const headers = {}
+  if (API_TOKEN) headers["X-Deploy-Token"] = API_TOKEN
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 8000)
+  try {
+    const r = await fetch(`${API_URL}${pathname}`, { headers, signal: ctrl.signal })
+    clearTimeout(timer)
+    const data = await r.json()
+    return data
+  } finally { clearTimeout(timer) }
+}
+
+// Synchronise la base SQLite depuis l'API : pull des deploiements termines puis
+// UPSERT. Appelee a l'ouverture de la page Stats. Ne jette pas : en cas d'echec
+// API, on garde ce qui est deja en base.
+async function syncDeployments() {
+  try {
+    const res = await apiGet("/api/deploy/completed")
+    if (res && res.success && Array.isArray(res.data)) {
+      upsertDeployments(res.data)
+      return { ok: true, synced: res.data.length }
+    }
+    return { ok: false, error: "Reponse API invalide." }
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+}
 
 // ─── App ───────────────────────────────────────────────────
 const app = express()
@@ -117,6 +171,68 @@ function requireAuth(req, res, next) {
   next()
 }
 
+// ─── Outil PUBLIC de generation de hash ────────────────────
+// Page simple : on saisit un mot de passe, on obtient le hash scrypt a coller
+// dans PASSWORD_ADMIN_HASH. Public (pas de secret expose : ca ne fait que
+// hasher une saisie). Le hashage se fait cote SERVEUR (le mot de passe ne reste
+// pas dans l'URL ni dans l'historique).
+app.post("/hash", (req, res) => {
+  const { password } = req.body || {}
+  if (!password) return res.status(400).json({ success: false, error: "Mot de passe vide." })
+  const salt = crypto.randomBytes(16)
+  const derived = crypto.scryptSync(String(password), salt, 32)
+  res.json({ success: true, hash: `scrypt$${salt.toString("hex")}$${derived.toString("hex")}` })
+})
+
+app.get("/hash", (req, res) => {
+  res.set("Content-Type", "text/html; charset=utf-8")
+  res.send(`<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSWinDeploy - Generateur de hash</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#11151c;color:#e4e9f0;display:flex;
+       align-items:center;justify-content:center;min-height:100vh;margin:0}
+  .card{background:#1a212c;border:1px solid #2c3848;border-radius:10px;padding:32px;width:min(520px,92%)}
+  h1{font-size:18px;margin:0 0 4px}.sub{color:#8a98ad;font-size:13px;margin-bottom:20px}
+  label{display:block;font-size:12px;color:#8a98ad;margin:14px 0 4px}
+  input{width:100%;box-sizing:border-box;background:#11151c;border:1px solid #2c3848;color:#e4e9f0;
+        border-radius:6px;padding:9px 11px;font-size:14px}
+  input:focus{outline:none;border-color:#f0a830}
+  button{margin-top:16px;background:#f0a830;color:#1a1206;border:none;border-radius:6px;
+         padding:9px 16px;font-weight:600;cursor:pointer;font-size:14px}
+  .out{margin-top:18px;display:none}
+  .out code{display:block;background:#11151c;border:1px solid #2c3848;border-radius:6px;
+            padding:12px;font-family:ui-monospace,monospace;font-size:12.5px;word-break:break-all;color:#3ec46d}
+  .hint{color:#8a98ad;font-size:12px;margin-top:8px}
+  .copy{background:#222b38;color:#e4e9f0;border:1px solid #2c3848;margin-top:8px}
+</style></head><body>
+<div class="card">
+  <h1>Generateur de hash admin</h1>
+  <div class="sub">PSWinDeploy // a coller dans PASSWORD_ADMIN_HASH</div>
+  <label>Mot de passe</label>
+  <input id="pwd" type="password" autofocus autocomplete="new-password" placeholder="Saisis le mot de passe admin">
+  <button onclick="go()">Generer le hash</button>
+  <div class="out" id="out">
+    <label>Hash a copier dans ton .env / docker-compose :</label>
+    <code id="hash"></code>
+    <button class="copy" onclick="cp()">Copier</button>
+    <div class="hint">PASSWORD_ADMIN_HASH=&lt;ce hash&gt; -- le mot de passe en clair n'est stocke nulle part.</div>
+  </div>
+</div>
+<script>
+async function go(){
+  const p=document.getElementById('pwd').value
+  if(!p)return
+  const r=await fetch('/hash',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})})
+  const d=await r.json()
+  if(d.hash){document.getElementById('hash').textContent=d.hash;document.getElementById('out').style.display='block'}
+}
+function cp(){navigator.clipboard.writeText(document.getElementById('hash').textContent)}
+document.getElementById('pwd').addEventListener('keydown',e=>{if(e.key==='Enter')go()})
+</script>
+</body></html>`)
+})
+
 // ─── Auth ──────────────────────────────────────────────────
 app.post("/auth/login", (req, res) => {
   const { user, password } = req.body || {}
@@ -167,6 +283,53 @@ app.get("/diag", requireAuth, async (req, res) => {
 // ─── Proxy securise vers l'API PowerShell ──────────────────
 // /api/* exige une session. Le BFF injecte le token API (cote serveur) avant
 // de relayer. Le navigateur ne voit jamais ce token.
+// ─── Stats de deploiement (SQLite cote conteneur) ─────────
+// IMPORTANT : ces routes sont AVANT le proxy /api generique pour qu'il ne les
+// relaie pas a l'API. Elles synchronisent depuis l'API puis lisent SQLite.
+app.get("/api/deploy/stats", requireAuth, async (req, res) => {
+  const sync = await syncDeployments()   // pull + upsert (best effort)
+  try {
+    const stats = computeStats()
+    res.json({ success: true, data: stats, sync })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || "Erreur stats." })
+  }
+})
+
+app.get("/api/deploy/completed", requireAuth, async (req, res) => {
+  await syncDeployments()
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 200)
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0)
+    const { rows, total } = listCompleted({ limit, offset })
+    res.json({ success: true, data: rows, total, limit, offset })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || "Erreur lecture." })
+  }
+})
+
+// Suppression manuelle d'un suivi (SQLite uniquement -- l'API garde son historique).
+app.delete("/api/deploy/completed/:id", requireAuth, (req, res) => {
+  try {
+    const n = deleteDeployment(req.params.id)
+    res.json({ success: true, deleted: n })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || "Erreur suppression." })
+  }
+})
+
+// Purge manuelle des deploiements plus vieux que N mois (defaut : PURGE_MONTHS,
+// sinon 12). Body optionnel : { months: N }.
+app.post("/api/deploy/purge", requireAuth, (req, res) => {
+  try {
+    const months = Number(req.body?.months) || PURGE_MONTHS || 12
+    const n = purgeOlderThan(months)
+    res.json({ success: true, purged: n, months })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || "Erreur purge." })
+  }
+})
+
 app.use("/api", requireAuth, async (req, res) => {
   if (!API_URL) {
     return res.status(503).json({ success: false, error: "URL_API_PSWINDEPLOY non configuree dans le conteneur." })

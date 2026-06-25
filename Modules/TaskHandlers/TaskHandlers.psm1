@@ -474,8 +474,9 @@ function Invoke-TaskInstallApps {
             $cands = @()
             if ($catPath) {
                 if ($catPath -match '\.psd1$') { $cands += $catPath }
-                else { $cands += (Join-Path $catPath 'applications.psd1') }
+                else { $cands += (Join-Path $catPath 'catalogue.psd1'); $cands += (Join-Path $catPath 'applications.psd1') }
             }
+            $cands += 'C:\Deploy\Catalogue\catalogue.psd1'
             $cands += 'C:\Deploy\Catalogue\applications.psd1'
             foreach ($cc in $cands) {
                 if ($cc -and (Test-Path $cc -EA SilentlyContinue)) {

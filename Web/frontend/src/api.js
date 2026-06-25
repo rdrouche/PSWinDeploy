@@ -49,4 +49,8 @@ export const api = {
   scriptContent: (relPath) => call("GET", `/api/scripts/content?path=${encodeURIComponent(relPath)}`),
   deployCurrent: () => call("GET", "/api/deploy/current"),
   deployHistory: (id) => call("GET", `/api/deploy/history/${encodeURIComponent(id)}`),
+  deployStats: () => call("GET", "/api/deploy/stats"),
+  deployCompleted: (limit = 25, offset = 0) => call("GET", `/api/deploy/completed?limit=${limit}&offset=${offset}`),
+  deleteDeployment: (id) => call("DELETE", `/api/deploy/completed/${encodeURIComponent(id)}`),
+  purgeDeployments: (months) => call("POST", "/api/deploy/purge", { months }),
 }

@@ -62,6 +62,49 @@ function Get-PrimaryMacAddress {
     return $null
 }
 
+function Set-DeployApiEndpoint {
+    <#
+    .SYNOPSIS Depose sur le poste les coordonnees de l'API (URL + token) pour
+        que le moteur P2 puisse envoyer ses heartbeats de suivi.
+    .DESCRIPTION
+        Ecrit deux fichiers dans le dossier Runtime :
+          C:\Deploy\Runtime\api-url.txt    (l'URL de l'API, ex http://10.0.8.111:8080)
+          C:\Deploy\Runtime\api-token.txt  (le token API, si l'API est protegee)
+        Send-DeployReport (TaskEngine) lit ces fichiers a chaque heartbeat.
+        Si l'URL est vide, on n'ecrit rien (suivi desactive, le deploiement
+        fonctionne quand meme).
+    .PARAMETER ApiUrl   URL de l'API Pode.
+    .PARAMETER ApiToken Token API (optionnel ; identique a apiToken cote serveur).
+    .PARAMETER RuntimeDir Dossier Runtime local (defaut C:\Deploy\Runtime).
+    #>
+    param(
+        [string]$ApiUrl,
+        [string]$ApiToken = '',
+        [string]$RuntimeDir = 'C:\Deploy\Runtime'
+    )
+    if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
+        Write-PILog "Pas d'URL d'API fournie : suivi des deploiements desactive." 'INFO'
+        return
+    }
+    if (-not (Test-Path $RuntimeDir)) {
+        New-Item -ItemType Directory $RuntimeDir -Force -EA SilentlyContinue | Out-Null
+    }
+    try {
+        Set-Content -Path (Join-Path $RuntimeDir 'api-url.txt') -Value $ApiUrl.Trim() -Encoding UTF8 -NoNewline -EA Stop
+        Write-PILog "URL de l'API deposee pour le suivi : $ApiUrl" 'OK'
+    } catch {
+        Write-PILog "Impossible d'ecrire api-url.txt : $($_.Exception.Message)" 'WARN'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ApiToken)) {
+        try {
+            Set-Content -Path (Join-Path $RuntimeDir 'api-token.txt') -Value $ApiToken.Trim() -Encoding UTF8 -NoNewline -EA Stop
+            Write-PILog "Token API depose pour le suivi." 'OK'
+        } catch {
+            Write-PILog "Impossible d'ecrire api-token.txt : $($_.Exception.Message)" 'WARN'
+        }
+    }
+}
+
 function Resolve-PostInstallSequence {
     <#
     .SYNOPSIS Cherche une sequence affectee au poste (par MAC) sur le partage.
@@ -502,6 +545,7 @@ function Build-SequenceInteractive {
 }
 
 Export-ModuleMember -Function @(
+    'Set-DeployApiEndpoint'
     'Get-PrimaryMacAddress',
     'Test-PostInstallSequenceExists',
     'Resolve-PostInstallSequence',
