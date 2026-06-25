@@ -15,6 +15,7 @@ $script:ApiConfig = @{
     SequencesPath = ''     # \\srv\Deploy\Sequences
     DriverShare   = ''     # \\srv\Drivers
     CataloguePath = ''     # \\srv\...\applications.psd1 ou local
+    ScriptShare   = ''     # \\srv\Scripts (scripts de sequence)
     HistoryPath   = ''     # dossier d'historique des deploiements
 }
 
@@ -32,13 +33,94 @@ function Initialize-ApiLogic {
 
 function Get-ApiConfig { return $script:ApiConfig }
 
+function Initialize-ApiLogicFromProject {
+    <#
+    .SYNOPSIS Initialise la logique API a partir du ProjectRoot : lit la config
+        PSWinDeploy.psd1, resout les partages (DNS/IP) et configure les chemins.
+        Concentre toute la logique ici (appelable depuis Pode sans scriptblock).
+    #>
+    param([string]$ProjectRoot)
+
+    # Defensif : si le ProjectRoot n'est pas fourni (State Pode pas encore pret),
+    # on ne plante pas -- on laisse la config avec des chemins vides (les
+    # fonctions retourneront des listes vides au lieu de crasher).
+    if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { return }
+
+    $cfg = $null
+    $cfgPath = Join-Path $ProjectRoot 'PSWinDeploy.psd1'
+    if (Test-Path $cfgPath -EA SilentlyContinue) {
+        try { $cfg = Import-PowerShellDataFile $cfgPath -EA Stop } catch {}
+    }
+
+    # Helper local : resout une valeur de chemin.
+    #  - PRIORITE aux chemins LOCAUX de la section ApiPaths (API sur le serveur).
+    #  - Sinon, valeur du partage : si @{DNS;IP} -> on prend DNS, sinon string.
+    #  - $fallback si rien.
+    $apiPaths = $null
+    if ($cfg -and $cfg.ContainsKey('ApiPaths') -and ($cfg['ApiPaths'] -is [hashtable])) {
+        $apiPaths = $cfg['ApiPaths']
+    }
+    $resolvePath = {
+        param($Key, $Fallback)
+        # 1) chemin local explicite (ApiPaths) -> priorite absolue
+        if ($apiPaths -and $apiPaths.ContainsKey($Key) -and -not [string]::IsNullOrWhiteSpace("$($apiPaths[$Key])")) {
+            return "$($apiPaths[$Key])"
+        }
+        # 2) valeur du partage dans la config racine (UNC, eventuellement @{DNS;IP})
+        if ($cfg -and $cfg.ContainsKey($Key)) {
+            $v = $cfg[$Key]
+            if ($v -is [hashtable]) { if ($v.ContainsKey('DNS')) { return "$($v['DNS'])" } }
+            elseif (-not [string]::IsNullOrWhiteSpace("$v")) { return "$v" }
+        }
+        return $Fallback
+    }
+
+    $seqPath  = & $resolvePath 'SequencesPath' ''
+    $drvShare = & $resolvePath 'DriverShare'   ''
+    $scrShare = & $resolvePath 'ScriptShare'   ''
+    # Catalogue : priorite ApiPaths, sinon config CataloguePath (UNC), sinon local.
+    $catPath  = & $resolvePath 'CataloguePath' (Join-Path $ProjectRoot 'Catalogue\applications.psd1')
+
+    Initialize-ApiLogic -Config @{
+        ProjectRoot   = $ProjectRoot
+        SequencesPath = $seqPath
+        DriverShare   = $drvShare
+        ScriptShare   = $scrShare
+        CataloguePath = $catPath
+    }
+}
+
 # ===========================================================================
 #  CATALOGUE (synchro JSON <-> PSD1)
 # ===========================================================================
-function Get-AppCatalogue {
-    <# .SYNOPSIS Lit le catalogue d'applications (PSD1) et retourne la liste d'apps. #>
+function Read-TextFileSafe {
+    <# .SYNOPSIS Lit un fichier texte de facon ROBUSTE : ouverture en lecture
+        partagee (n'echoue pas si le fichier est ouvert ailleurs), detection
+        d'encodage (BOM), sans pipeline PowerShell. Retourne le texte ou un
+        message d'erreur lisible (jamais d'exception qui remonte en 500). #>
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8, $true)
+            try { return $sr.ReadToEnd() }
+            finally { $sr.Dispose() }
+        } finally { $fs.Dispose() }
+    } catch {
+        return "(lecture impossible : $($_.Exception.Message))"
+    }
+}
+
+function Get-CataloguePath {
+    <# .SYNOPSIS Retourne le chemin du catalogue actuellement resolu (diagnostic). #>
     $path = $script:ApiConfig.CataloguePath
     if (-not $path) { $path = Join-Path $script:ApiConfig.ProjectRoot 'Catalogue\applications.psd1' }
+    return $path
+}
+
+function Get-AppCatalogue {
+    <# .SYNOPSIS Lit le catalogue d'applications (PSD1) et retourne la liste d'apps. #>
+    $path = Get-CataloguePath
     $data = ConvertFrom-Psd1File -Path $path
     if (-not $data) { return @() }
     $apps = if ($data.ContainsKey('Applications')) { $data['Applications'] } else { $data }
@@ -46,13 +128,91 @@ function Get-AppCatalogue {
 }
 
 function Save-AppCatalogue {
-    <# .SYNOPSIS Ecrit le catalogue (depuis une liste d'apps) en PSD1 avec BOM. #>
+    <# .SYNOPSIS Ecrit le catalogue (depuis une liste d'apps) en PSD1 avec BOM.
+        PRESERVE la structure existante : si le fichier actuel a une cle
+        'Applications', on garde @{Applications=@(...)} ; sinon on ecrit la liste
+        directement. Ainsi le format reste celui que le deploiement attend. #>
     param([Parameter(Mandatory)]$Apps)
     $path = $script:ApiConfig.CataloguePath
     if (-not $path) { $path = Join-Path $script:ApiConfig.ProjectRoot 'Catalogue\applications.psd1' }
-    $obj = @{ Applications = @($Apps) }
+
+    # Determiner la structure existante pour la conserver.
+    $wrapInApplications = $true   # defaut : @{ Applications = @(...) }
+    $existing = ConvertFrom-Psd1File -Path $path
+    if ($existing) {
+        if ($existing -is [hashtable] -and $existing.ContainsKey('Applications')) {
+            $wrapInApplications = $true
+        } elseif ($existing -is [System.Array] -or ($existing -is [System.Collections.IEnumerable] -and $existing -isnot [string] -and $existing -isnot [hashtable])) {
+            # Le fichier actuel est une LISTE directe d'apps -> on garde ce format.
+            $wrapInApplications = $false
+        }
+    }
+
+    if ($wrapInApplications) {
+        $obj = @{ Applications = @($Apps) }
+    } else {
+        $obj = @($Apps)
+    }
     Save-Psd1File -Object $obj -Path $path | Out-Null
     return $path
+}
+
+function Add-AppToCatalogue {
+    <#
+    .SYNOPSIS Ajoute UNE application au catalogue, ou la MET A JOUR si une app
+        du meme Name existe deja (fusion, pas ecrasement du catalogue entier).
+    .PARAMETER App  hashtable de l'app (doit avoir au moins Name).
+    .OUTPUTS hashtable : @{ path; count; updated=$true/$false }
+    #>
+    param([Parameter(Mandatory)][hashtable]$App)
+
+    $name = "$($App['Name'])"
+    if ([string]::IsNullOrWhiteSpace($name)) { throw "L'application doit avoir un 'Name'." }
+
+    # Lire l'existant et fusionner.
+    $apps = @(Get-AppCatalogue)
+    $found = $false
+    $merged = @()
+    foreach ($a in $apps) {
+        $aName = ''
+        if ($a -is [hashtable]) { if ($a.ContainsKey('Name')) { $aName = "$($a['Name'])" } }
+        elseif ($a.PSObject.Properties['Name']) { $aName = "$($a.Name)" }
+
+        if ($aName -ieq $name) {
+            # Remplacer l'app existante par la nouvelle version.
+            $merged += $App
+            $found = $true
+        } else {
+            $merged += $a
+        }
+    }
+    if (-not $found) { $merged += $App }   # nouvelle app -> on l'ajoute
+
+    $path = Save-AppCatalogue -Apps $merged
+    return @{ path = $path; count = @($merged).Count; updated = $found }
+}
+
+function Remove-AppFromCatalogue {
+    <#
+    .SYNOPSIS Retire une application du catalogue par son Name.
+    .OUTPUTS hashtable : @{ path; count; removed=$true/$false }
+    #>
+    param([Parameter(Mandatory)][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { throw "Name requis." }
+
+    $apps = @(Get-AppCatalogue)
+    $kept = @()
+    $removed = $false
+    foreach ($a in $apps) {
+        $aName = ''
+        if ($a -is [hashtable]) { if ($a.ContainsKey('Name')) { $aName = "$($a['Name'])" } }
+        elseif ($a.PSObject.Properties['Name']) { $aName = "$($a.Name)" }
+
+        if ($aName -ieq $Name) { $removed = $true }   # on saute (= on retire)
+        else { $kept += $a }
+    }
+    $path = Save-AppCatalogue -Apps $kept
+    return @{ path = $path; count = @($kept).Count; removed = $removed }
 }
 
 # ===========================================================================
@@ -64,6 +224,99 @@ function Format-MacAddress {
     param([string]$Mac)
     if (-not $Mac) { return '' }
     return ($Mac -replace '[:-]', '').ToUpper()
+}
+
+function Save-SequenceTemplate {
+    <# .SYNOPSIS Genere une sequence TEMPLATE a la racine du dossier Sequences
+        (au meme niveau que by-name/ et by-mac/). Reutilisable directement en P2
+        via le choix de l'assistant sur le poste. #>
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$Sequence
+    )
+    # Nettoyer le nom (pas de separateurs de chemin).
+    $safe = ($Name -replace '[\\/:*?"<>|]', '_').Trim()
+    if ([string]::IsNullOrWhiteSpace($safe)) { throw "Nom de template invalide." }
+    $root = $script:ApiConfig.SequencesPath
+    if (-not $root) { throw "SequencesPath non configure." }
+    if (-not (Test-Path $root -EA SilentlyContinue)) { New-Item -ItemType Directory $root -Force -EA SilentlyContinue | Out-Null }
+    $path = Join-Path $root "$safe.psd1"
+    Save-Psd1File -Object $Sequence -Path $path | Out-Null
+    return $path
+}
+
+function Get-SequenceContent {
+    <# .SYNOPSIS Lit le contenu BRUT d'une sequence (pour affichage lecture seule
+        dans l'UI). Securise : n'autorise que les .psd1 SOUS le dossier Sequences
+        (anti-traversee de chemin). Type = template|by-name|by-mac. #>
+    param(
+        [Parameter(Mandatory)][string]$Type,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $root = $script:ApiConfig.SequencesPath
+    if (-not $root) { return $null }
+    $safe = ($Name -replace '[\\/:*?"<>|]', '_')
+    switch ($Type) {
+        'by-name' { $dir = Join-Path $root 'by-name' }
+        'by-mac'  { $dir = Join-Path $root 'by-mac' }
+        default   { $dir = $root }   # template a la racine
+    }
+    $path = Join-Path $dir "$safe.psd1"
+    # Securite anti-traversee : le nom est deja nettoye ($safe), donc le fichier
+    # est forcement dans $dir. On evite Resolve-Path (couteux sur UNC).
+    $item = Get-Item -LiteralPath $path -EA SilentlyContinue
+    if (-not $item) { return $null }
+    # DOIT etre un fichier (pas un dossier) -- sinon Get-Content boucle/bloque.
+    if ($item.PSIsContainer) { return $null }
+    if ($item.Length -gt 1MB) { return "(fichier trop volumineux pour l'affichage : $([math]::Round($item.Length/1KB)) Ko)" }
+    return (Read-TextFileSafe -Path $item.FullName)
+}
+
+function Get-SequenceObject {
+    <# .SYNOPSIS Lit une sequence et la retourne en OBJET (hashtable), pas en
+        texte. Pode la serialisera en JSON pour le front (qui peut alors la
+        charger dans l'editeur). Memes garde-fous de chemin que Get-SequenceContent. #>
+    param(
+        [Parameter(Mandatory)][string]$Type,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $root = $script:ApiConfig.SequencesPath
+    if (-not $root) { return $null }
+    $safe = ($Name -replace '[\\/:*?"<>|]', '_')
+    switch ($Type) {
+        'by-name' { $dir = Join-Path $root 'by-name' }
+        'by-mac'  { $dir = Join-Path $root 'by-mac' }
+        default   { $dir = $root }
+    }
+    $path = Join-Path $dir "$safe.psd1"
+    $item = Get-Item -LiteralPath $path -EA SilentlyContinue
+    if (-not $item) { return $null }
+    if ($item.Length -gt 1MB) { return $null }
+    return (ConvertFrom-Psd1File -Path $path)
+}
+
+function Get-ScriptShareDebug {
+    <# .SYNOPSIS Retourne le ScriptShare resolu (diagnostic). #>
+    return $script:ApiConfig.ScriptShare
+}
+
+function Get-ScriptContent {
+    <# .SYNOPSIS Lit le contenu BRUT d'un script .ps1 du partage Scripts (lecture
+        seule UI). Securise : seulement les .ps1 SOUS ScriptShare. #>
+    param([Parameter(Mandatory)][string]$RelativePath)
+    $root = $script:ApiConfig.ScriptShare
+    if (-not $root) { return $null }
+    # Refuser toute tentative de remontee.
+    if ($RelativePath -match '\.\.') { return $null }
+    # Normaliser : retirer un eventuel separateur initial (sinon Join-Path
+    # traite le chemin comme absolu et la jointure echoue) ; uniformiser les /.
+    $relClean = $RelativePath.TrimStart([char]0x5C, [char]0x2F).Replace([char]0x2F, [char]0x5C)
+    if ([System.IO.Path]::GetExtension($relClean) -ne '.ps1') { return $null }
+    $path = Join-Path $root $relClean
+    $item = Get-Item -LiteralPath $path -EA SilentlyContinue
+    if (-not $item -or $item.PSIsContainer) { return $null }
+    if ($item.Length -gt 1MB) { return "(fichier trop volumineux pour l'affichage : $([math]::Round($item.Length/1KB)) Ko)" }
+    return (Read-TextFileSafe -Path $item.FullName)
 }
 
 function Save-SequenceByName {
@@ -128,11 +381,57 @@ function Get-DriverModelList {
     if (-not $root -or -not (Test-Path $root -EA SilentlyContinue)) { return $result }
     foreach ($d in @(Get-ChildItem $root -Directory -EA SilentlyContinue)) {
         if ($d.Name -ieq 'WinPE') { continue }
-        $infCount = @(Get-ChildItem $d.FullName -Filter '*.inf' -Recurse -EA SilentlyContinue).Count
+        # Compter les .inf avec une profondeur BORNEE (-Depth) : meme si le
+        # dossier contient une jonction cyclique, la descente s'arrete et ne
+        # boucle pas a l'infini.
+        $infCount = @(Get-ChildItem $d.FullName -Filter '*.inf' -Recurse -Depth 6 -EA SilentlyContinue).Count
         $result += [PSCustomObject]@{
             Name     = $d.Name
             InfCount = $infCount
             Path     = $d.FullName
+        }
+    }
+    return $result
+}
+
+function Get-ScriptList {
+    <# .SYNOPSIS Liste les scripts .ps1 du partage Scripts. Pour que l'interface
+        web les propose dans l'editeur (type RunScript). Parcours recursif BORNE
+        et SANS suivre les liens symboliques/jonctions (anti-boucle infinie sur
+        les partages avec des jonctions cycliques). #>
+    $root = $script:ApiConfig.ScriptShare
+    $result = @()
+    if (-not $root -or -not (Test-Path $root -EA SilentlyContinue)) { return $result }
+
+    # Normaliser le root (chemin complet, sans backslash final) pour calculer
+    # des chemins relatifs fiables.
+    $rootFull = (Resolve-Path $root -EA SilentlyContinue).Path
+    if (-not $rootFull) { return $result }
+    $rootTrim = $rootFull.TrimEnd([char]0x5C)
+
+    # Parcours en LARGEUR avec une file, profondeur bornee, en IGNORANT les
+    # ReparsePoint (liens/jonctions) -> impossible de boucler a l'infini.
+    $maxDepth = 8
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+    $queue.Enqueue([PSCustomObject]@{ Dir = $rootTrim; Depth = 0 })
+
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
+        # Fichiers .ps1 du dossier courant.
+        foreach ($f in @(Get-ChildItem -LiteralPath $cur.Dir -Filter '*.ps1' -File -EA SilentlyContinue)) {
+            $rel = $f.FullName
+            if ($rel.Length -gt $rootTrim.Length) { $rel = $rel.Substring($rootTrim.Length).TrimStart([char]0x5C) }
+            $result += [PSCustomObject]@{ Name = $f.Name; RelativePath = $rel; FullPath = $f.FullName }
+        }
+        # Sous-dossiers (si on n'a pas atteint la profondeur max), en sautant les
+        # points de reparse (jonctions/liens symboliques) qui peuvent boucler.
+        if ($cur.Depth -lt $maxDepth) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $cur.Dir -Directory -EA SilentlyContinue)) {
+                $isReparse = ($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq [System.IO.FileAttributes]::ReparsePoint
+                if (-not $isReparse) {
+                    $queue.Enqueue([PSCustomObject]@{ Dir = $d.FullName; Depth = ($cur.Depth + 1) })
+                }
+            }
         }
     }
     return $result
@@ -197,14 +496,25 @@ function Get-DeployHistory {
 
 Export-ModuleMember -Function @(
     'Initialize-ApiLogic'
+    'Initialize-ApiLogicFromProject'
     'Get-ApiConfig'
+    'Read-TextFileSafe'
+    'Get-CataloguePath'
     'Get-AppCatalogue'
     'Save-AppCatalogue'
+    'Add-AppToCatalogue'
+    'Remove-AppFromCatalogue'
     'Format-MacAddress'
     'Save-SequenceByName'
     'Save-SequenceByMac'
     'Get-SequenceList'
+    'Save-SequenceTemplate'
+    'Get-SequenceContent'
+    'Get-SequenceObject'
+    'Get-ScriptContent'
+    'Get-ScriptShareDebug'
     'Get-DriverModelList'
+    'Get-ScriptList'
     'Write-DeployReport'
     'Get-DeployCurrentList'
     'Get-DeployHistory'

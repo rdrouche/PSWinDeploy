@@ -583,6 +583,27 @@ function Invoke-TaskRunScript {
     $scriptArgs = "$(Get-StepParam $Step 'args' -Default '')"
     if (-not $scriptPath) { return New-TaskResult -Success:$false -Message "RunScript : 'path' obligatoire" }
 
+    # Le chemin accepte DEUX formes :
+    #   - chemin UNC/absolu complet : '\\SERVEUR\Scripts\x.ps1' (utilise tel quel)
+    #   - chemin relatif : 'x.ps1' ou 'sous-dossier\x.ps1' (resolu sur le
+    #     partage Scripts, recupere depuis la config ScriptShare).
+    $isAbsolute = ($scriptPath -like '\\*') -or ($scriptPath -match '^[A-Za-z]:\\')
+    if (-not $isAbsolute) {
+        $scriptShare = ''
+        $gcfg = Get-Ctx $Context 'GetConfig'
+        if ($gcfg) {
+            try {
+                $ss = & $gcfg 'ScriptShare'
+                if ($ss -is [hashtable]) { if ($ss.ContainsKey('DNS')) { $scriptShare = "$($ss['DNS'])" } }
+                elseif ($ss) { $scriptShare = "$ss" }
+            } catch {}
+        }
+        if ($scriptShare) {
+            $resolved = Join-Path $scriptShare $scriptPath
+            if (Test-Path $resolved -EA SilentlyContinue) { $scriptPath = $resolved }
+        }
+    }
+
     Write-TaskLog "RunScript : $scriptPath" 'INFO' $Context $Step.id
     if (-not (Test-Path $scriptPath -EA SilentlyContinue)) {
         return New-TaskResult -Success:$false -Message "Script introuvable : $scriptPath"

@@ -1,0 +1,13 @@
+services:
+  pswindeploy-web:
+    image: forge.rdr-it.com/dockerfiles/pswindeploy-web:${TAG_PSWD_WEB:-nightly}
+    container_name: pswindeploy-web
+    restart: unless-stopped
+    ports:
+      - "8088:3000"                          # http://<hote>:8088
+    environment:
+      URL_API_PSWINDEPLOY: ${URL_API_PSWINDEPLOY:?REQUIRED-URL-PSWINDEPLOY-SERVER}
+      TOKEN_API_PSWINDEPLOY: ${TOKEN_API_PSWINDEPLOY:?REQUIRED-TOKEN-API}      
+      PASSWORD_ADMIN_HASH: "${PASSWORD_ADMIN_HASH:?REQUIRED-HASH-PASSWORD}"      
+      ADMIN_USER: "${ADMIN_USER:-admin}"      
+      SESSION_TTL_HOURS: "${SESSION_TTL_HOURS:-12}"

@@ -289,7 +289,20 @@ function Send-DeployReport {
         } | ConvertTo-Json -Compress
 
         $uri = "$($ApiUrl.TrimEnd('/'))/api/deploy/report"
-        Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 5 -EA SilentlyContinue | Out-Null
+
+        # Token d'API (si l'API est securisee) : lu depuis un fichier depose au
+        # deploiement. Envoye dans l'en-tete X-Deploy-Token. Si absent, on
+        # n'envoie pas d'en-tete (cas API en acces libre).
+        $headers = @{}
+        $tokFile = 'C:\Deploy\Runtime\api-token.txt'
+        if (Test-Path $tokFile -EA SilentlyContinue) {
+            try {
+                $tok = (Get-Content $tokFile -Raw -EA SilentlyContinue).Trim()
+                if ($tok) { $headers['X-Deploy-Token'] = $tok }
+            } catch {}
+        }
+
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -Headers $headers -TimeoutSec 5 -EA SilentlyContinue | Out-Null
     } catch {
         # Silencieux : l'API peut etre injoignable, le deploiement continue.
     }

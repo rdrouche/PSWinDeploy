@@ -1,0 +1,15 @@
+@{
+    Id    = 'exemple-by-mace'
+    Name  = 'Exemple sequence par adresse MAC'
+    Steps = @(
+        @{
+            Id          = 'test-01'
+            Type        = 'RunScript'
+            Name        = 'Script de test (cree C:\test\test.txt)'
+            Phase       = 'Windows'
+            Enabled     = $true
+            RebootAfter = 'Never'
+            Params      = @{ Path = 'C:\Deploy\Scripts\Test-PostInstall.ps1'; Shell = 'PowerShell' }
+        }
+    )
+}

@@ -4,7 +4,7 @@
     Author            = 'PSWinDeploy'
     Description       = "Construction d'environnements WinPE bootables"
     PowerShellVersion = '5.1'
-    RequiredModules   = @('Config')
+    RequiredModules   = @()  # charges manuellement par Import-DeployModule (ordre gere par les scripts)
     RootModule        = 'WinPE-Builder.psm1'
     FunctionsToExport = @(
         'Set-WinPEConfig','Get-WinPEConfig',

@@ -380,8 +380,7 @@ function Remove-AutoLogon {
         en clair dans le registre de la machine deployee.
     #>
     [CmdletBinding()]
-    param([string]$Hive = 'HKLM']
-    )
+    param([string]$Hive = 'HKLM')
 
     $regPath = "$Hive`:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
     Write-PLog "Suppression autologon..." -Level INFO

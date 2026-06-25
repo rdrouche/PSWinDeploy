@@ -10,6 +10,38 @@
     # Peut aussi etre active ponctuellement par le switch -DebugMode de Start-Deploy.
     debugMode       = $false
 
+    # -- Securite API -------------------------------------
+    # apiToken : token qui protege l'API. Si DEFINI (chaine non vide), toute
+    # requete qui MODIFIE des donnees (POST/PUT/DELETE/PATCH) doit fournir ce
+    # token dans l'en-tete 'X-Deploy-Token'. Les lectures (GET) restent libres.
+    # Si VIDE, l'API est en acces libre (a eviter hors LAN de confiance).
+    #
+    # C'est CE token que le conteneur web recevra (variable TOKEN_API_PSWINDEPLOY)
+    # pour pouvoir effectuer les modifications. C'est aussi lui que les postes en
+    # deploiement utilisent pour le heartbeat.
+    #
+    # Genere un token : [guid]::NewGuid().ToString('N')
+    # (On peut aussi le surcharger par la variable d'environnement PSWD_API_TOKEN
+    #  sur le serveur qui lance l'API, qui a alors la priorite.)
+    apiToken        = ''
+
+    # -- Chemins LOCAUX pour l'API ------------------------
+    # L'API web tourne sur le serveur de deploiement lui-meme. Pour eviter les
+    # soucis de droits/double-hop UNC, on lui donne les chemins LOCAUX (memes
+    # fichiers que ceux partages, mais acces direct au disque).
+    # Si une cle est definie ici, l'API l'utilise. Sinon, elle resout l'UNC
+    # (DNS/IP) du partage correspondant. Renseigne TES vrais chemins locaux :
+    ApiPaths = @{
+        # Catalogue d'applications (MEME fichier que le deploiement lit).
+        CataloguePath = 'E:\Shares\Deploy\Catalogue\catalogue.psd1'
+        # Dossier des sequences (templates + by-name + by-mac).
+        SequencesPath = 'E:\Shares\Deploy\Sequences'
+        # Dossier des drivers (modeles par poste).
+        DriverShare   = 'E:\Shares\Drivers'
+        # Dossier des scripts de sequence (type RunScript).
+        ScriptShare   = 'E:\Shares\Scripts'
+    }
+
     # -- ADK / WinPE --------------------------------------
     # x86 retire depuis ADK 2004 -- amd64 et arm64 seulement
     AdkPath         = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'

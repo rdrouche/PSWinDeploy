@@ -5,7 +5,7 @@
     Description       = "Moteur d'execution des sequences de deploiement JSON"
     PowerShellVersion = '5.1'
     RootModule        = 'TaskSequence.psm1'
-    RequiredModules   = @('WIM-Manager','DiskSelector')
+    RequiredModules   = @()  # charges manuellement par Import-DeployModule (ordre gere par les scripts)
     FunctionsToExport = @(
         'Invoke-TaskSequence','Test-TaskSequence',
         'Initialize-SecretVault','Get-Secret',

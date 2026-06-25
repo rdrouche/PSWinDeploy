@@ -25,10 +25,17 @@ function ConvertTo-Psd1String {
         $Object,
         [int]$Indent = 0
     )
+    # GARDE-FOU anti-boucle : profondeur maximale.
+    if ($Indent -gt 64) { $s = "$Object".Replace("'", "''"); return "'$s'" }
+
     $sp  = '    ' * $Indent
     $sp1 = '    ' * ($Indent + 1)
 
     if ($null -eq $Object) { return '$null' }
+
+    # Scalaires traites en premier (jamais parcourus comme des collections).
+    if ($Object -is [string]) { $s = "$Object".Replace("'", "''"); return "'$s'" }
+    if ($Object -is [char])   { $s = "$Object".Replace("'", "''"); return "'$s'" }
 
     # Booleen
     if ($Object -is [bool]) { return $(if ($Object) { '$true' } else { '$false' }) }
@@ -136,16 +143,23 @@ function ConvertFrom-JsonToHashtable {
     param([Parameter(Mandatory)][string]$Json)
 
     function Convert-Node {
-        param($Node)
+        param($Node, [int]$Depth = 0)
+        if ($Depth -gt 64) { return "$Node" }
         if ($null -eq $Node) { return $null }
+        # Scalaires : jamais parcourus comme collections.
+        if ($Node -is [string] -or $Node -is [bool] -or $Node -is [char] -or
+            $Node.GetType().IsPrimitive -or $Node -is [decimal]) {
+            return $Node
+        }
         if ($Node -is [System.Management.Automation.PSCustomObject]) {
             $h = @{}
-            foreach ($p in $Node.PSObject.Properties) { $h[$p.Name] = Convert-Node $p.Value }
+            foreach ($p in $Node.PSObject.Properties) { $h[$p.Name] = Convert-Node $p.Value ($Depth + 1) }
             return $h
         }
-        if ($Node -is [System.Array] -or ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string])) {
+        if ($Node -is [System.Array] -or $Node -is [System.Collections.IList] -or
+            ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string])) {
             $arr = @()
-            foreach ($it in $Node) { $arr += , (Convert-Node $it) }
+            foreach ($it in $Node) { $arr += , (Convert-Node $it ($Depth + 1)) }
             return , $arr
         }
         return $Node
@@ -155,10 +169,58 @@ function ConvertFrom-JsonToHashtable {
     return (Convert-Node $parsed)
 }
 
+function ConvertTo-HashtableDeep {
+    <#
+    .SYNOPSIS Convertit un objet PowerShell (PSCustomObject/hashtable/array)
+        en hashtable/array recursif, SANS passer par JSON. Utile pour transformer
+        directement $WebEvent.Data (deja parse par Pode) en structure prete pour
+        le PSD1.
+    .OUTPUTS hashtable / array / scalaire.
+    #>
+    param($Node, [int]$Depth = 0)
+
+    # GARDE-FOU anti-boucle : profondeur maximale. Au-dela, on renvoie la valeur
+    # telle quelle (evite toute recursion infinie sur des donnees cycliques ou
+    # des types .NET qui s'enumerent eux-memes).
+    if ($Depth -gt 64) { return "$Node" }
+
+    if ($null -eq $Node) { return $null }
+
+    # Scalaires : on ne descend JAMAIS dedans (string, nombres, bool, char,
+    # datetime, guid...). On les retourne directement. C'est ce qui empeche la
+    # boucle : un [char] ou un [string] est enumerable mais ne doit pas etre
+    # parcouru caractere par caractere.
+    if ($Node -is [string] -or $Node -is [bool] -or $Node -is [char] -or
+        $Node -is [datetime] -or $Node -is [guid] -or $Node -is [System.Enum] -or
+        $Node.GetType().IsPrimitive -or $Node -is [decimal]) {
+        return $Node
+    }
+
+    if ($Node -is [hashtable] -or $Node -is [System.Collections.IDictionary]) {
+        $h = @{}
+        foreach ($k in $Node.Keys) { $h[$k] = ConvertTo-HashtableDeep $Node[$k] ($Depth + 1) }
+        return $h
+    }
+    if ($Node -is [System.Management.Automation.PSCustomObject]) {
+        $h = @{}
+        foreach ($p in $Node.PSObject.Properties) { $h[$p.Name] = ConvertTo-HashtableDeep $p.Value ($Depth + 1) }
+        return $h
+    }
+    # Listes/tableaux uniquement (apres avoir ecarte les scalaires ci-dessus).
+    if ($Node -is [System.Array] -or $Node -is [System.Collections.IList] -or
+        ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string])) {
+        $arr = @()
+        foreach ($it in $Node) { $arr += , (ConvertTo-HashtableDeep $it ($Depth + 1)) }
+        return , $arr
+    }
+    return $Node
+}
+
 Export-ModuleMember -Function @(
     'ConvertTo-Psd1String'
     'Save-Psd1File'
     'ConvertFrom-Psd1File'
     'ConvertTo-JsonSafe'
     'ConvertFrom-JsonToHashtable'
+    'ConvertTo-HashtableDeep'
 )
