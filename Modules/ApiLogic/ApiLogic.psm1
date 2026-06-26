@@ -506,21 +506,52 @@ function Get-DeployCompleted {
         }
         if ($events.Count -eq 0) { continue }
 
-        $done = $events | Where-Object { "$($_.status)" -eq 'done' } | Select-Object -First 1
-        $first = $events[0]
-        $last  = $events[-1]
-        $start = $null; $end = $null
-        try { $start = [datetime]::Parse($first.timestamp) } catch {}
-        try { $end   = [datetime]::Parse($last.timestamp) } catch {}
-        $durationSec = $null
-        if ($start -and $end) { $durationSec = [math]::Round(($end - $start).TotalSeconds) }
+        # Helper : parser un timestamp ISO en tenant compte de l'OFFSET de fuseau
+        # (DateTimeOffset). Crucial car la P1 (WinPE) peut etre en +01:00 et la
+        # P2 (Windows) en +02:00 -- [datetime]::Parse perdrait l'offset et
+        # donnerait des durees fausses (voire negatives). On compare en UTC.
+        $parseTs = {
+            param($ts)
+            $dto = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse("$ts", [ref]$dto)) { return $dto.UtcDateTime }
+            return $null
+        }
 
-        # Nom affiche : le DERNIER nom reel connu (apres renommage en P2). On
-        # ignore le nom generique WinPE 'MINWINPC'. Si jamais nomme, on retombe
-        # sur la MAC.
-        $displayName = ''
+        # GERER LES CYCLES MULTIPLES : un meme history peut contenir plusieurs
+        # deploiements (relances) -> plusieurs 'done'. On ne garde que le DERNIER
+        # cycle : on trouve le dernier 'done', et on remonte jusqu'au debut de ce
+        # cycle (l'evenement juste apres le 'done' precedent, ou le tout debut).
+        $doneIdx = -1
         for ($k = $events.Count - 1; $k -ge 0; $k--) {
-            $cn = "$($events[$k].computerName)"
+            if ("$($events[$k].status)" -eq 'done') { $doneIdx = $k; break }
+        }
+        # Debut du dernier cycle = juste apres l'avant-dernier 'done'.
+        $cycleStart = 0
+        if ($doneIdx -ge 0) {
+            for ($k = $doneIdx - 1; $k -ge 0; $k--) {
+                if ("$($events[$k].status)" -eq 'done') { $cycleStart = $k + 1; break }
+            }
+        }
+        $cycleEnd = if ($doneIdx -ge 0) { $doneIdx } else { $events.Count - 1 }
+        $cycle = $events[$cycleStart..$cycleEnd]
+
+        $done  = $events[$doneIdx]   # $null si pas de done
+        $first = $cycle[0]
+        $last  = $cycle[-1]
+        $start = & $parseTs $first.timestamp
+        $end   = & $parseTs $last.timestamp
+        $durationSec = $null
+        if ($start -and $end) {
+            $d = [math]::Round(($end - $start).TotalSeconds)
+            # Garde-fou : une duree negative ne devrait plus arriver, mais par
+            # securite on la borne a 0 (jamais de temps negatif affiche).
+            $durationSec = [math]::Max(0, $d)
+        }
+
+        # Nom affiche : dernier nom reel connu (apres renommage P2), hors MINWINPC.
+        $displayName = ''
+        for ($k = $cycle.Count - 1; $k -ge 0; $k--) {
+            $cn = "$($cycle[$k].computerName)"
             if ($cn -and $cn -ne 'MINWINPC') { $displayName = $cn; break }
         }
         $macVal = "$($last.mac)"; if (-not $macVal) { $macVal = "$($first.mac)" }
@@ -530,12 +561,12 @@ function Get-DeployCompleted {
             Id           = $f.BaseName -replace '^history-', ''
             ComputerName = $displayName
             Mac          = $macVal
-            Status       = if ($done) { 'done' } else { "$($last.status)" }
-            Completed    = [bool]$done
+            Status       = if ($doneIdx -ge 0) { 'done' } else { "$($last.status)" }
+            Completed    = [bool]($doneIdx -ge 0)
             Start        = if ($start) { $start.ToString('o') } else { $null }
             End          = if ($end) { $end.ToString('o') } else { $null }
             DurationSec  = $durationSec
-            Events       = $events.Count
+            Events       = $cycle.Count
         }
     }
     return $result

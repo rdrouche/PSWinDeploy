@@ -790,12 +790,8 @@ function Invoke-ScratchWizard {
         Invoke-SimpleDeploy -WimPath $selectedWim -Index $selectedIndex -DiskNumber $diskNum `
             -UnattendParams $uParams -CopyDeploy:(-not $advNoCopyDeploy) -NoReboot:$advNoReboot `
             -ModulesRoot $modulesDir -SequencePath $phase2Seq -DeployConfig $deployCfg `
-            -DriverModelPath $driverModelPath -NoDriverPrompt
-
-        # SUIVI P1 : phase 1 terminee, on va rebooter vers Windows (P2).
-        if ($p1ApiUrl -and (Get-Command Send-DeployReport -EA SilentlyContinue)) {
-            Send-DeployReport -ApiUrl $p1ApiUrl -ApiToken $p1ApiTok -Status 'rebooting' -Step 'WinPE-Done' -Percent 45 -Message 'OS applique : redemarrage vers Windows (phase 2)'
-        }
+            -DriverModelPath $driverModelPath -NoDriverPrompt `
+            -ApiUrl $p1ApiUrl -ApiToken $p1ApiTok
 
         # Retourner un marqueur : le flux principal ne doit PAS lancer la TaskSequence
         return 'SIMPLE-DONE'
@@ -1310,15 +1306,21 @@ try {
         }
 
         # Nettoyer les mecanismes de reprise (sequence finie -> ne pas reboucler) :
-        # RunOnce, autologon, et tache planifiee.
+        # RunOnce, autologon, et tache planifiee. FILET DE SECURITE : on le fait
+        # TOUJOURS en sortie de ce bloc (que l'assistant ait ete ouvert ou non,
+        # quel que soit le chemin), pour ne JAMAIS laisser la tache PSWinDeployResume
+        # active apres un deploiement termine.
         try {
             reg delete 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' /v 'PSWinDeployResume' /f 2>&1 | Out-Null
             # Desarmer l'autologon
             $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
             Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue
             Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue
-            # Supprimer la tache de reprise
+            # Supprimer la tache de reprise (les deux noms possibles par securite)
             Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null
+            schtasks /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null
+            # Centraliser via Disable-DeploymentMode si dispo (idempotent).
+            if (Get-Command Disable-DeploymentMode -EA SilentlyContinue) { Disable-DeploymentMode }
         } catch {}
 
         Write-Host ""

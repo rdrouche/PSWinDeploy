@@ -263,8 +263,9 @@ function MonitorPage({ toast }) {
   }, [])
 
   const statusBadge = (s) => {
-    const m = { running: "info", rebooting: "warn", done: "ok", error: "err" }
-    return <span className={`badge ${m[s] || ""}`}>{s || "?"}</span>
+    const m = { running: "info", rebooting: "warn", waiting: "warn", done: "ok", error: "err" }
+    const lbl = { waiting: "attente utilisateur" }
+    return <span className={`badge ${m[s] || ""}`}>{lbl[s] || s || "?"}</span>
   }
 
   return (

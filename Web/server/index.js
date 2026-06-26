@@ -46,6 +46,21 @@ const PORT       = Number(process.env.PORT || 3000)
 const STATIC_DIR = path.join(__dirname, "public")
 const SQLITE_PATH = process.env.SQLITE_PATH || "/data/pswd-stats.db"
 
+// Si l'API est en HTTPS avec un certificat auto-signe (objectif : chiffrer le
+// trafic, pas valider une PKI), on autorise le BFF a l'appeler sans rejeter le
+// certificat. Active uniquement quand l'URL API est en https ET que
+// API_TLS_INSECURE n'est pas explicitement "false".
+let insecureAgent = null
+if (API_URL.startsWith("https://") && String(process.env.API_TLS_INSECURE || "true").toLowerCase() !== "false") {
+  try {
+    const { Agent } = await import("undici")
+    insecureAgent = new Agent({ connect: { rejectUnauthorized: false } })
+    console.log("[bff] API en HTTPS : certificat auto-signe accepte (trafic chiffre).")
+  } catch (e) {
+    console.warn(`[bff] impossible d'activer l'agent TLS permissif : ${e?.message || e}`)
+  }
+}
+
 if (!API_URL)   console.warn("[bff] URL_API_PSWINDEPLOY non defini : les appels API echoueront.")
 if (!ADMIN_HASH && !ADMIN_PASS) console.warn("[bff] Aucun mot de passe admin configure (ni HASH ni clair) : le login refusera tout le monde.")
 if (!ADMIN_HASH && ADMIN_PASS) console.warn("[bff] PASSWORD_ADMIN en clair : preferez PASSWORD_ADMIN_HASH (voir hash-password).")
@@ -87,7 +102,7 @@ async function apiGet(pathname) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 8000)
   try {
-    const r = await fetch(`${API_URL}${pathname}`, { headers, signal: ctrl.signal })
+    const r = await fetch(`${API_URL}${pathname}`, { headers, signal: ctrl.signal, ...(insecureAgent ? { dispatcher: insecureAgent } : {}) })
     clearTimeout(timer)
     const data = await r.json()
     return data
@@ -269,7 +284,7 @@ app.get("/diag", requireAuth, async (req, res) => {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 8000)
   try {
-    const r = await fetch(`${API_URL}/api/health`, { signal: ctrl.signal })
+    const r = await fetch(`${API_URL}/api/health`, { signal: ctrl.signal, ...(insecureAgent ? { dispatcher: insecureAgent } : {}) })
     clearTimeout(timer)
     const text = await r.text()
     res.json({ ...out, ok: r.ok, status: r.status, sample: text.slice(0, 200) })
@@ -349,6 +364,7 @@ app.use("/api", requireAuth, async (req, res) => {
   init.signal = ctrl.signal
 
   try {
+    if (insecureAgent) init.dispatcher = insecureAgent
     const r = await fetch(target, init)
     clearTimeout(timer)
     const text = await r.text()

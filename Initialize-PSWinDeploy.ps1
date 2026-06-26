@@ -256,7 +256,18 @@ if ($winpeUserMode -eq 'local') {
     $winpeUserFull = "$wpeDomain\$winpeUser"
 }
 
-$winpePassword = Read-Password -Question "Mot de passe pour $winpeUserFull"
+if ($winpeUserMode -eq 'local') {
+    # Compte local : choix entre mot de passe aleatoire ou saisie manuelle.
+    $winpePasswordMode = Read-Answer -Question "[R] Aleatoire ou [S] Saisie du mot de passe" -Options @('R','S') -Default 'R'
+    if ($winpePasswordMode -eq 'R') {
+        $winpePassword = New-RandomString
+    } else {
+        $winpePassword = Read-Password -Question "Mot de passe pour $winpeUserFull"
+    }
+} else {
+    # Compte de domaine : saisie obligatoire (le compte existe deja dans l'AD).
+    $winpePassword = Read-Password -Question "Mot de passe pour $winpeUserFull"
+}
 
 # ---------------------------------------------------------------------------
 # ETAPE 4 -- JONCTION DOMAINE
@@ -294,18 +305,19 @@ Write-Host ""
 Write-Info "Mot de passe du compte Administrateur local (builtin) des machines :"
 Write-Info "Ce compte existe deja dans Windows -- on definit juste son mot de passe."
 Write-Info "Il sert a l'autologon de la phase 2 et reste l'admin de la machine."
-$localAdminPass = Read-Password -Question "Mot de passe Administrateur local"
-
-Write-Host ""
-Write-Info "Jonction de domaine AD (optionnel -- laisser vide si non utilise) :"
-$domainJoinUser = Read-Answer -Question "Compte de jonction (ex: CORP\\svc-join, vide=aucun)" -Default ''
-$domainJoinPass = ''
-if ($domainJoinUser) {
-    $domainJoinPass = Read-Password -Question "Mot de passe du compte de jonction"
+$localAdminPassMode = Read-Answer -Question "[R] Aleatoire ou [S] Saisie du mot de passe" -Options @('R','S') -Default 'R'
+if ($localAdminPassMode -eq 'R') {
+    $localAdminPass = New-RandomString
+} else {
+    $localAdminPass = Read-Password -Question "Mot de passe Administrateur local"
 }
 
+# NB : la jonction de domaine (compte + mot de passe) a DEJA ete demandee a
+# l'etape 4. On NE la redemande PAS ici (sinon double saisie + ecrasement des
+# variables de l'etape 4).
+
 Write-Host ""
-$vaultMode = Read-Answer -Question "Mode de chiffrement du vault" -Options @('AES','Plain') -Default 'AES'
+$vaultMode = Read-Answer -Question "Mode de chiffrement du vault" -Options @('AES','Plain') -Default 'Plain'
 
 $vaultPassword = ''
 if ($vaultMode -eq 'AES') {
@@ -397,12 +409,10 @@ $folders = @(
     "$InstallPath\App\API",
     "$InstallPath\App\Scripts",
     "$InstallPath\App\Web",
-    "$InstallPath\App\Profiles",
     "$InstallPath\App\Catalogue",
     "$InstallPath\App\Sequences",
     "$InstallPath\Shares\Images",
     "$InstallPath\Shares\Deploy",
-    "$InstallPath\Shares\Deploy\Profiles",
     "$InstallPath\Shares\Deploy\Catalogue",
     "$InstallPath\Shares\Deploy\Sequences",
     "$InstallPath\Shares\Deploy\Runtime",
@@ -455,7 +465,7 @@ foreach ($item in @('API','Web','docker-compose.yml')) {
     }
 }
 
-foreach ($item in @('Profiles','Catalogue','Sequences')) {
+foreach ($item in @('Catalogue','Sequences')) {
     $src = "$scriptDir\$item"
     if (Test-Path $src) {
         Copy-Item "$src\*" "$InstallPath\Shares\Deploy\$item\" -Recurse -Force
@@ -880,6 +890,18 @@ Write-Host ""
     Write-Host "  IMPORTANT -- Token API genere : $apiToken" -ForegroundColor Yellow
     Write-Host "     (identique dans PSWinDeploy.psd1 et le .env du conteneur)" -ForegroundColor DarkGray
 Write-Host ""
+    # Afficher les mots de passe generes aleatoirement : l'admin ne les connait
+    # pas autrement (ils sont dans le vault, mais utile de les noter une fois).
+    if ($winpeUserMode -eq 'local' -and $winpePasswordMode -eq 'R') {
+        Write-Host "  Mot de passe genere -- $winpeUserFull (acces partages) : $winpePassword" -ForegroundColor Yellow
+    }
+    if ($localAdminPassMode -eq 'R') {
+        Write-Host "  Mot de passe genere -- Administrateur local des machines : $localAdminPass" -ForegroundColor Yellow
+    }
+    if (($winpeUserMode -eq 'local' -and $winpePasswordMode -eq 'R') -or $localAdminPassMode -eq 'R') {
+        Write-Host "     (note-les : ils sont stockes dans le vault, mais affiches ici une seule fois)" -ForegroundColor DarkGray
+        Write-Host ""
+    }
 
 if ($errors.Count -eq 0) {
     Write-Host "  Tout est pret -- aucune erreur !" -ForegroundColor Green

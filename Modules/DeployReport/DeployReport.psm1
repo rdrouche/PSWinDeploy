@@ -147,6 +147,16 @@ function Send-DeployReport {
 
         $uri = "$($ApiUrl.TrimEnd('/'))/api/deploy/report"
 
+        # Si l'API est en HTTPS avec un cert auto-signe (objectif : chiffrer le
+        # trafic), on accepte le certificat sans validation stricte. PS 5.1 :
+        # callback global. Best effort, sans casser si deja defini.
+        if ($uri -like 'https:*') {
+            try {
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+            } catch {}
+        }
+
         # Token d'API (si l'API est securisee) : priorite au parametre -ApiToken
         # (utile en phase 1 WinPE ou api-token.txt n'existe pas encore), sinon
         # lu depuis le fichier depose au deploiement. Envoye dans X-Deploy-Token.

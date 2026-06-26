@@ -71,7 +71,9 @@ function Invoke-SimpleDeploy {
         [switch]$NoReboot,
         [string]$ModulesRoot = '',
         [string]$SequencePath = '',  # sequence a copier sur C:\Deploy\Runtime pour la phase 2
-        [hashtable]$DeployConfig = @{}  # infos pour la phase 2 : NetworkShare, ServerIP, etc.
+        [hashtable]$DeployConfig = @{},  # infos pour la phase 2 : NetworkShare, ServerIP, etc.
+        [string]$ApiUrl = '',         # suivi : URL API pour le heartbeat de reboot P1
+        [string]$ApiToken = ''        # suivi : token API
     )
 
     $script:SimpleLogFile = Find-SimpleLogShare
@@ -277,6 +279,13 @@ function Invoke-SimpleDeploy {
     Write-Host "  La machine va redemarrer pour finaliser l'installation Windows." -ForegroundColor White
     Write-Host "  (OOBE -> autologon -> phase 2 si configuree)" -ForegroundColor DarkGray
     Write-Host ""
+
+    # SUIVI P1 : signaler "OS applique, reboot imminent" AVANT le reboot (sinon
+    # la machine redemarre et le heartbeat ne partirait jamais). Best effort.
+    if ($ApiUrl -and (Get-Command Send-DeployReport -EA SilentlyContinue)) {
+        Send-DeployReport -ApiUrl $ApiUrl -ApiToken $ApiToken -Status 'rebooting' -Step 'WinPE-Done' -Percent 45 -Message 'OS applique : redemarrage vers Windows (phase 2)'
+    }
+
     for ($i = 10; $i -ge 1; $i--) {
         Write-Host "`r  Redemarrage dans $i secondes...  (Ctrl+C pour annuler)   " -ForegroundColor Yellow -NoNewline
         Start-Sleep -Seconds 1

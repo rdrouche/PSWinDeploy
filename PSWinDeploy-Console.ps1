@@ -830,39 +830,145 @@ function Show-LogsMenu {
 # GESTION DES PROFILS
 # ---------------------------------------------------------------------------
 
-function Show-ProfilesMenu {
-    Write-MenuHeader "Profils de deploiement"
-    Write-MenuItem '1' 'Lister les profils disponibles'
-    Write-MenuItem '2' 'Valider un profil (dry-run de la sequence)'
-    Write-MenuItem '3' 'Afficher le detail d un profil'
+function Show-HttpsMenu {
+    Write-MenuHeader "API HTTPS / Certificat"
+    Write-Info "Objectif : CHIFFRER le trafic de l'API (cert auto-signe accepte)."
+    Write-Info "Les clients (interface web, postes) ignorent les erreurs de cert."
+    Write-Host ""
+
+    $certDir  = Join-Path (Split-Path $cfgFile -Parent) 'Certs'
+    $certPfx  = Join-Path $certDir 'pswd-api.pfx'
+    $httpsState = if (Test-Path $certPfx -EA SilentlyContinue) { 'cert present' } else { 'aucun cert' }
+    Write-Host "    Etat : " -ForegroundColor Gray -NoNewline
+    Write-Host $httpsState -ForegroundColor $(if ($httpsState -eq 'cert present') { 'Green' } else { 'DarkGray' })
+    Write-Host ""
+
+    Write-MenuItem '1' 'Generer un certificat auto-signe (le plus simple)'
+    Write-MenuItem '2' 'Fournir mon propre certificat (.pfx)'
+    Write-MenuItem '3' 'Afficher comment activer HTTPS dans Start-API.ps1'
+    Write-MenuItem '4' 'Revenir en HTTP (desactiver HTTPS)'
     Write-MenuSep
     Write-MenuItem 'R' 'Retour'
     $c = Read-MenuChoice
     switch ($c) {
         '1' {
             Write-Host ""
-            $profPath = $cfg.ProfilesPath
-            if (Test-Path $profPath -EA SilentlyContinue) {
-                $files = Get-ChildItem $profPath -Filter '*.psd1' -EA SilentlyContinue
-                Write-Info "$($files.Count) profil(s) dans $profPath"
+            try {
+                if (-not (Test-Path $certDir)) { New-Item -ItemType Directory $certDir -Force | Out-Null }
+                $srvName = if ($cfg.WinPEShareServer) { $cfg.WinPEShareServer } else { $env:COMPUTERNAME }
+                $srvIp   = if ($cfg.WinPEShareServerIP) { $cfg.WinPEShareServerIP } else { '' }
+                $dns = @($srvName, 'localhost')
+                if ($srvIp) { $dns += $srvIp }
+                Write-Info "Generation d'un certificat auto-signe pour : $($dns -join ', ')"
+                # Mot de passe aleatoire pour proteger le .pfx
+                $pfxPass = -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+                $cert = New-SelfSignedCertificate -DnsName $dns -CertStoreLocation 'Cert:\LocalMachine\My' `
+                            -FriendlyName 'PSWinDeploy API' -NotAfter (Get-Date).AddYears(5) -EA Stop
+                $sec = ConvertTo-SecureString $pfxPass -AsPlainText -Force
+                Export-PfxCertificate -Cert $cert -FilePath $certPfx -Password $sec | Out-Null
+                # Retirer le cert du magasin (on garde juste le .pfx)
+                Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -Force -EA SilentlyContinue
+                # Sauver le mot de passe du pfx a cote (lecture admin only)
+                Set-Content -Path (Join-Path $certDir 'pswd-api.pfx.pass') -Value $pfxPass -Encoding UTF8
+                Write-OK "Certificat genere : $certPfx"
+                Write-Info "Mot de passe du .pfx enregistre dans pswd-api.pfx.pass"
+                Write-Host ""
+                Write-Info "Pour activer : option 3 (instructions Start-API.ps1)."
+            } catch {
+                Write-Warn "Echec generation cert : $_"
+            }
+            Invoke-Pause
+        }
+        '2' {
+            Write-Host "  [?]  Chemin du .pfx a utiliser : " -ForegroundColor White -NoNewline
+            $src = (Read-Host).Trim().Trim('"')
+            if ($src -and (Test-Path $src)) {
+                if (-not (Test-Path $certDir)) { New-Item -ItemType Directory $certDir -Force | Out-Null }
+                Copy-Item $src $certPfx -Force
+                Write-OK "Certificat copie : $certPfx"
+                Write-Info "Renseigne le mot de passe du .pfx dans Start-API.ps1 (option 3)."
+            } else { Write-Warn "Fichier introuvable." }
+            Invoke-Pause
+        }
+        '3' {
+            Write-Host ""
+            Write-Info "Pour servir l'API en HTTPS, lance Deploy-API.ps1 avec :"
+            Write-Host "    -CertPath '$certPfx' -CertPassword '<mot-de-passe-pfx>'" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Info "Cote interface web (conteneur) : mets URL_API_PSWINDEPLOY en https://"
+            Write-Info "Le backend ignore deja les erreurs de cert auto-signe."
+            Write-Host ""
+            Write-Info "Edite $InstallRoot\Start-API.ps1 pour ajouter ces parametres."
+            Invoke-Pause
+        }
+        '4' {
+            Write-Host ""
+            Write-Warn "Pour revenir en HTTP : retire -CertPath/-CertPassword de Start-API.ps1."
+            Write-Info "L'API ecoutera alors en HTTP simple (port 8080)."
+            Invoke-Pause
+        }
+    }
+}
+
+function Show-SequencesMenu {
+    Write-MenuHeader "Sequences de deploiement"
+    $seqPath = $cfg.SequencesPath
+    # Etat de la sequence par defaut (_default.psd1 actif, ou _default.psd1.DISABLE).
+    $defActive  = Join-Path $seqPath '_default.psd1'
+    $defDisabled = Join-Path $seqPath '_default.psd1.DISABLE'
+    $defState = if (Test-Path $defActive -EA SilentlyContinue) { 'ACTIVE' }
+                elseif (Test-Path $defDisabled -EA SilentlyContinue) { 'desactivee' }
+                else { 'absente' }
+    $defColor = if ($defState -eq 'ACTIVE') { 'Yellow' } else { 'DarkGray' }
+    Write-Host "    Sequence par defaut (_default) : " -ForegroundColor Gray -NoNewline
+    Write-Host $defState -ForegroundColor $defColor
+    Write-Host ""
+
+    Write-MenuItem '1' 'Lister les sequences disponibles'
+    Write-MenuItem '2' 'Valider une sequence (dry-run)'
+    Write-MenuItem '3' 'Afficher le detail d une sequence'
+    Write-MenuItem '4' "Activer / desactiver la sequence par defaut [$defState]"
+    Write-MenuItem '5' 'Editer les sequences (assistant)'
+    Write-MenuSep
+    Write-MenuItem 'R' 'Retour'
+    $c = Read-MenuChoice
+    switch ($c) {
+        '1' {
+            Write-Host ""
+            if (Test-Path $seqPath -EA SilentlyContinue) {
+                # Sequences = *.psd1 (hors _default), + modeles, + by-name/by-mac.
+                $files = Get-ChildItem $seqPath -Filter '*.psd1' -EA SilentlyContinue
+                Write-Info "$($files.Count) sequence(s) dans $seqPath"
                 foreach ($f in $files) {
+                    $tag = if ($f.Name -like '_default*') { ' (defaut)' } else { '' }
                     try {
-                        $p = Get-Content $f.FullName -Raw | ConvertFrom-Json
-                        $dom = if ($p.overrides -and $p.overrides.'metadata.domain') { $p.overrides.'metadata.domain' } else { 'Standalone' }
-                        $reqA = if ($p.requiredApps) { $p.requiredApps.Count } else { 0 }
-                        Write-Host "    $($p.name)" -ForegroundColor White -NoNewline
-                        Write-Host "  [$dom]  $reqA app(s) oblig." -ForegroundColor DarkGray
-                        Write-Host "    $($f.FullName)" -ForegroundColor DarkGray
+                        $s = Import-PowerShellDataFile $f.FullName -EA Stop
+                        $nm = if ($s.Name) { $s.Name } else { $f.BaseName }
+                        $os = if ($s.Metadata -and $s.Metadata.Os) { $s.Metadata.Os } else { '?' }
+                        $nbSteps = if ($s.Steps) { @($s.Steps).Count } else { 0 }
+                        Write-Host "    $nm$tag" -ForegroundColor White -NoNewline
+                        Write-Host "  [$os]  $nbSteps step(s)" -ForegroundColor DarkGray
+                        Write-Host "    $($f.Name)" -ForegroundColor DarkGray
                         Write-Host ""
                     } catch { Write-Warn "Invalide : $($f.Name)" }
                 }
-            } else { Write-Warn "Dossier profils inaccessible : $profPath" }
+                # Sequences nominatives (by-name / by-mac)
+                foreach ($sub in @('by-name','by-mac')) {
+                    $subDir = Join-Path $seqPath $sub
+                    if (Test-Path $subDir -EA SilentlyContinue) {
+                        $subFiles = Get-ChildItem $subDir -Filter '*.psd1' -EA SilentlyContinue
+                        if ($subFiles.Count -gt 0) {
+                            Write-Host "    [$sub] $($subFiles.Count) sequence(s) nominative(s)" -ForegroundColor Cyan
+                        }
+                    }
+                }
+            } else { Write-Warn "Dossier sequences inaccessible : $seqPath" }
             Invoke-Pause
         }
         '2' {
             if ($modsLoaded['TaskSequence']) {
                 Write-Host "  [?]  Chemin sequence a valider : " -ForegroundColor White -NoNewline
-                $sp = (Read-Host).Trim()
+                $sp = (Read-Host).Trim().Trim('"')
                 if ($sp -and (Test-Path $sp)) {
                     Write-Host ""
                     Test-TaskSequence -SequencePath $sp
@@ -871,22 +977,39 @@ function Show-ProfilesMenu {
             Invoke-Pause
         }
         '3' {
-            Write-Host "  [?]  Nom du profil (ou chemin .json) : " -ForegroundColor White -NoNewline
-            $inp = (Read-Host).Trim()
+            Write-Host "  [?]  Nom de la sequence (ou chemin .psd1) : " -ForegroundColor White -NoNewline
+            $inp = (Read-Host).Trim().Trim('"')
             $fp  = $null
             if (Test-Path $inp -EA SilentlyContinue) { $fp = $inp }
             else {
-                $found = Get-ChildItem $cfg.ProfilesPath -Filter '*.psd1' -EA SilentlyContinue |
-                         Where-Object { $_.BaseName -match $inp -or (Get-Content $_.FullName -Raw | ConvertFrom-Json).name -match $inp } |
-                         Select-Object -First 1
+                $found = Get-ChildItem $seqPath -Filter '*.psd1' -EA SilentlyContinue |
+                         Where-Object { $_.BaseName -match [regex]::Escape($inp) } | Select-Object -First 1
                 if ($found) { $fp = $found.FullName }
             }
             if ($fp) {
                 Write-Host ""
-                Get-Content $fp -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 10 |
-                    Write-Host -ForegroundColor Gray
-            } else { Write-Warn "Profil non trouve : $inp" }
+                Get-Content $fp -Raw | Write-Host -ForegroundColor Gray
+            } else { Write-Warn "Sequence non trouvee : $inp" }
             Invoke-Pause
+        }
+        '4' {
+            # Toggle de la sequence par defaut : ACTIVE <-> .DISABLE.
+            Write-Host ""
+            if (Test-Path $defActive -EA SilentlyContinue) {
+                Rename-Item $defActive '_default.psd1.DISABLE' -Force -EA SilentlyContinue
+                Write-OK "Sequence par defaut DESACTIVEE (renommee _default.psd1.DISABLE)."
+                Write-Info "Le moteur ne la prendra plus automatiquement."
+            } elseif (Test-Path $defDisabled -EA SilentlyContinue) {
+                Rename-Item $defDisabled '_default.psd1' -Force -EA SilentlyContinue
+                Write-OK "Sequence par defaut REACTIVEE (_default.psd1)."
+            } else {
+                Write-Warn "Aucune sequence par defaut (_default.psd1) trouvee dans $seqPath."
+            }
+            Invoke-Pause
+        }
+        '5' {
+            Write-Host ""
+            Invoke-Script $scriptPaths.Deploy
         }
     }
 }
@@ -1139,12 +1262,13 @@ while ($true) {
     Write-Host "  WINPE" -ForegroundColor DarkGray
     Write-MenuItem 'W' 'Construire le WinPE' 'Assistant build (packages, drivers, ISO, WIM PXE)'
     Write-MenuItem 'E' 'Exporter une image WIM' 'Depuis un ISO Windows'
+    Write-MenuItem 'R' 'Drivers' 'Resume, recherche et organisation des drivers'
     Write-Host ""
 
     Write-Host "  ADMINISTRATION" -ForegroundColor DarkGray
     Write-MenuItem 'S' 'Sante du systeme' 'Rapport complet (ADK, partages, vault, WDS...)'
     Write-MenuItem 'V' 'Vault / Mots de passe' 'Changer, rotater, convertir les secrets'
-    Write-MenuItem 'P' 'Profils et sequences' 'Lister, valider, afficher'
+    Write-MenuItem 'P' 'Sequences' 'Lister, valider, afficher, (des)activer la sequence par defaut'
     Write-MenuItem 'L' 'Journaux' 'Consulter, rechercher, nettoyer'
     Write-MenuItem 'N' 'Notifications' 'Tester email et Teams'
     Write-Host ""
@@ -1152,6 +1276,7 @@ while ($true) {
     Write-Host "  CONFIGURATION" -ForegroundColor DarkGray
     Write-MenuItem 'M' 'Mise a jour'                  'Mettre a jour depuis une archive ou dossier'
     Write-MenuItem 'U' 'Debloquer les scripts'        'Supprimer les avertissements Zone Internet'
+    Write-MenuItem 'H' 'API HTTPS / Certificat'       'Generer un cert auto-signe ou en fournir un (chiffrer l API)'
     Write-MenuItem 'I' 'Re-initialiser' 'Relancer Initialize-PSWinDeploy.ps1'
     Write-MenuItem 'C' 'Ouvrir PSWinDeploy.psd1' 'Editer la configuration dans le Bloc-notes'
     $advState = if ($cfg.AdvancedMode) { 'ACTIVE' } else { 'desactive' }
@@ -1213,10 +1338,11 @@ while ($true) {
         }
         's' { Show-HealthReport }
         'v' { Show-VaultMenu }
-        'p' { Show-ProfilesMenu }
+        'p' { Show-SequencesMenu }
         'l' { Show-LogsMenu }
-        'v' { Show-DriversMenu }
+        'r' { Show-DriversMenu }
         'n' { Show-NotifyMenu }
+        'h' { Show-HttpsMenu }
         'm' { Invoke-Script $scriptPaths.Update }
         'u' {
             if (Test-Path $scriptPaths.Unblock) {

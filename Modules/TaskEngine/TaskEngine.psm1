@@ -130,6 +130,8 @@ function Disable-DeploymentMode {
         Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue
     } catch {}
     try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
+    # Filet : certaines configs n'aiment pas Unregister-ScheduledTask -> schtasks.
+    try { schtasks /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
     Write-EngineLog "Mode deploiement desactive (autologon OFF, tache supprimee)." 'INFO'
 }
 

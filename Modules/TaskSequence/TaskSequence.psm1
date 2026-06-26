@@ -1603,8 +1603,18 @@ function Invoke-StepShowWizard {
     Write-TSLog "Ouverture de l'assistant post-installation (depuis la sequence)..." -Level STEP -StepId $Step.id
     $selfPath = 'C:\Deploy\Scripts\Start-Deploy.ps1'
     if (-not (Test-Path $selfPath)) { Write-TSLog "Start-Deploy introuvable pour l'assistant" -Level WARN -StepId $Step.id; return @{ Success = $false } }
+    # SUIVI : signaler "en attente d'une action utilisateur" pendant que
+    # l'assistant interactif est ouvert (le deploiement est en pause cote
+    # operateur). Best effort, silencieux si l'API est injoignable.
+    if (Get-Command Send-DeployReport -EA SilentlyContinue) {
+        Send-DeployReport -Status 'waiting' -Step $Step.id -Percent 0 -Message 'En attente d''une action utilisateur (assistant ouvert)'
+    }
     try {
         Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', "`"$selfPath`"", '-PostInstallWizard') -Wait
+        # L'operateur a termine : on repasse en cours d'execution.
+        if (Get-Command Send-DeployReport -EA SilentlyContinue) {
+            Send-DeployReport -Status 'running' -Step $Step.id -Percent 100 -Message 'Action utilisateur terminee (assistant ferme)'
+        }
         return @{ Success = $true }
     } catch {
         Write-TSLog "Lancement assistant echoue : $_" -Level WARN -StepId $Step.id

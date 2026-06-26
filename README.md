@@ -1,275 +1,210 @@
-﻿# PSWinDeploy v0.6.9
+# PSWinDeploy
 
-Remplacement de MDT en PowerShell moderne. Deploiement Windows depuis WinPE via partages SMB, vault de secrets, sequences PSD1.
+**Un remplacement moderne de MDT, écrit en PowerShell.**
+Déploiement Windows de bout en bout depuis WinPE : partitionnement, application du WIM, injection des drivers, puis post-installation pilotée par séquences — le tout supervisé depuis une interface web.
 
-## Architecture
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE?logo=powershell&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-WinPE%20%7C%2010%2B-0078D6?logo=windows&logoColor=white)
+![Docker](https://img.shields.io/badge/Web%20UI-Docker-2496ED?logo=docker&logoColor=white)
+![Version](https://img.shields.io/badge/version-0.6.9-f0a830)
+
+> ⚠️ **Projet en développement actif.** PSWinDeploy est fonctionnel et utilisé en environnement de test, mais l'API et certains formats peuvent encore évoluer. À éprouver avant toute mise en production.
+
+---
+
+## Pourquoi ?
+
+MDT n'est plus activement développé, repose sur des composants vieillissants et reste difficile à versionner ou à automatiser proprement. PSWinDeploy repart d'une base simple et lisible :
+
+- **Tout est du PowerShell 5.1** (présent nativement sur Windows, aucun runtime à installer).
+- **Configuration en clair** (`.psd1` versionnables, séquences lisibles, pas de base de données opaque).
+- **Partages SMB standard** pour les images, drivers, logiciels et scripts.
+- **Une interface web** pour suivre les déploiements, gérer le catalogue d'applications et les séquences, et consulter des statistiques.
+
+---
+
+## Architecture en deux phases
+
+Le déploiement est découpé en deux temps distincts, ce qui simplifie le débogage et le suivi.
 
 ```
-[Serveur S-PS-DEP-1]          [Machine cible]
-  PSWinDeploy-Console.ps1       Boot WinPE ISO/PXE
-  ??? [D] Gerer sequences  ?    \\S-PS-DEP-1\Deploy\Sequences\*.psd1
-  ??? [W] Build WinPE      ?    WinPE-amd64.iso
-  ??? [E] Export WIM       ?    \\S-PS-DEP-1\Images\*.wim
-  ??? [V] Vault            ?    secrets.vault.psd1
-
-[WinPE]
-  Start-Deploy.ps1
-  ??? Connexion SMB (vault PSD1 ? svc-winpe)
-  ??? Liste sequences .psd1
-  ??? Choix disque cible
-  ??? Execution sequence ? Windows installe
+   PHASE 1 — WinPE (Start-Deploy.ps1)        PHASE 2 — Windows (moteur de séquences)
+   ┌──────────────────────────────┐          ┌──────────────────────────────────┐
+   │ • Sélection du disque         │          │ • Jonction domaine (optionnelle)  │
+   │ • Partitionnement / format    │   reboot │ • Windows Update                  │
+   │ • Application du WIM           │ ───────► │ • Installation des logiciels      │
+   │ • Injection des drivers       │          │ • Scripts de configuration        │
+   │ • Préparation phase 2         │          │ • Assistant interactif (option)   │
+   └──────────────────────────────┘          └──────────────────────────────────┘
+              │                                            │
+              └───────────── heartbeats ───────────────────┘
+                                  ▼
+                       API Pode  ◄────►  Interface web (Docker)
+                  (source de vérité)      Suivi · Stats · Catalogue
 ```
 
-## Prerequis
+- **Phase 1** s'occupe de tout ce qui précède le premier démarrage de Windows.
+- **Phase 2** est pilotée par une **séquence** (`.psd1`) : une liste d'étapes typées (jonction domaine, logiciels, scripts…).
+- Les deux phases envoient des **heartbeats** à l'API, qui alimentent le suivi temps réel et les statistiques.
+
+---
+
+## Composants
+
+| Composant | Rôle |
+|-----------|------|
+| **Console PowerShell** (`PSWinDeploy-Console.ps1`) | Centre de contrôle côté serveur : santé, vault, séquences, drivers, build WinPE, HTTPS. |
+| **API Pode** (`API/Deploy-API.ps1`) | API REST : sert le catalogue, les séquences, reçoit les heartbeats, historise. Source de vérité. |
+| **Interface web** (`Web/`, Docker) | Suivi des déploiements, statistiques, édition du catalogue d'applications et des séquences. |
+| **Moteur de séquences** (`Modules/TaskEngine`) | Exécute les étapes de la phase 2 sur la machine cible. |
+| **Vault de secrets** | Stocke les mots de passe (compte WinPE, admin local, jonction domaine), en clair ou chiffré AES. |
+
+---
+
+## Prérequis
 
 | Composant | Version | Usage |
 |-----------|---------|-------|
-| Windows Server / Windows 10+ | -- | Serveur de deploiement |
-| PowerShell | 5.1 | Obligatoire (PS 7 non requis) |
-| ADK Windows 11 | 10.0.26100+ | copype.cmd, DISM, oscdimg |
-| WinPE Add-on | Meme version ADK | Architecture amd64 |
-| Docker Desktop | -- | Interface Web (optionnel) |
+| Windows Server / Windows 10+ | — | Serveur de déploiement |
+| PowerShell | 5.1 | Obligatoire (PowerShell 7 non requis) |
+| Windows ADK | 10.0.26100+ | `copype`, DISM, `oscdimg` |
+| WinPE Add-on | même version que l'ADK | Architecture amd64 ou arm64 |
+| Module Pode | 2.13+ | API REST (installé automatiquement) |
+| Docker | — | Interface web (optionnelle) |
 
-Telecharger ADK : https://learn.microsoft.com/windows-hardware/get-started/adk-install
-(Cocher : Deployment Tools + Windows PE Add-on)
+ADK : <https://learn.microsoft.com/windows-hardware/get-started/adk-install> — cocher **Deployment Tools** + **Windows PE Add-on**.
+
+---
 
 ## Installation
 
 ```powershell
-# 1. Extraire l'archive
-Expand-Archive PSWinDeploy_v0.6.9.zip E:\
+# 1. Débloquer l'archive si téléchargée depuis Internet
+Unblock-File .\PSWinDeploy_v0.6.9.zip
 
-# 2. Debloquer les fichiers (si telecharges depuis Internet)
-# AVANT d'extraire :
-Unblock-File PSWinDeploy_v0.6.9.zip
-# OU apres extraction :
-E:\PSWinDeploy\Unblock-PSWinDeploy.ps1
+# 2. Extraire où vous voulez (ex : E:\PSWinDeploy)
+Expand-Archive .\PSWinDeploy_v0.6.9.zip E:\
 
-# 3. Initialiser
+# 3. Lancer l'assistant d'installation (en administrateur)
 E:\PSWinDeploy\Initialize-PSWinDeploy.ps1
 ```
 
-L'assistant Initialize :
-- Cree les dossiers d'installation
-- Cree les partages SMB (Images, Deploy, Drivers, Logiciels, Scripts, Logs)
-- Configure PSWinDeploy.psd1
-- Cree le compte svc-winpe
+L'assistant guide pas à pas : dossier d'installation, partages SMB, compte d'accès WinPE, jonction domaine, mots de passe (saisis ou générés aléatoirement), WinPE, et génère la configuration ainsi qu'un token d'API. Il peut être relancé sans risque.
 
-## Configuration (PSWinDeploy.psd1)
+À la fin, il affiche le **token d'API** et les **mots de passe générés** — à conserver.
+
+---
+
+## Démarrage rapide
 
 ```powershell
-@{
-    Version          = '0.6.9'
-    ServerFQDN       = 'S-PS-DEP-1'          # Nom/IP du serveur
-    WinPEShareServer = 'S-PS-DEP-1'          # Pour le WinPE
-    WinPEShareUser   = 'S-PS-DEP-1\svc-winpe'
-    VaultPath        = 'C:\Deploy\secrets.vault.psd1'
-    VaultMethod      = 'Plain'               # Plain recommande (multi-operateurs)
-    AdkPath          = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
-    WinPEAddonPath   = '...\Windows Preinstallation Environment'
-    ImageShare       = '\\S-PS-DEP-1\Images'
-    DeployShare      = '\\S-PS-DEP-1\Deploy'
-    WinPELocale      = 'fr-FR'
-    Architecture     = 'amd64'
-}
+# Démarrer l'API
+E:\PSWinDeploy\Start-API.ps1
+
+# Ouvrir la console d'administration
+E:\PSWinDeploy\PSWinDeploy-Console.ps1
+
+# Construire l'ISO WinPE (depuis la console : [W], ou directement)
+E:\PSWinDeploy\Build-WinPE.ps1
 ```
 
-## Vault de secrets
+Puis, côté machine cible : démarrer sur l'ISO WinPE (ou via PXE), et le déploiement se lance.
 
-Format PSD1 (recommande, editable a la main) :
+---
 
-```powershell
-# secrets.vault.psd1
-@{
-    winpeUser         = 'S-PS-DEP-1\svc-winpe'
-    winpePassword     = 'MonMotDePasse'
-    domainJoinUser    = 'CORP\djoin'
-    domainJoinPassword = 'MotDePasseDomaine'
-    localAdminPassword = 'AdminLocal!'
-}
+## Interface web
+
+L'interface tourne dans un conteneur Docker. Le backend détient les secrets (token d'API, mot de passe admin) ; le navigateur ne reçoit qu'un cookie de session.
+
+```bash
+cd Web/
+# Renseigner Web/.env (pré-rempli par l'assistant : URL et token de l'API)
+# Générer le hash du mot de passe admin sur http://<hôte>:8088/hash
+docker compose up -d
 ```
 
-Format JSON legacy supporte pour compatibilite.
+Accessible sur `http://<hôte>:8088`. Elle propose :
 
-**Modes vault :**
-- `Plain` : vault en clair, protege par droits reseau + acces physique - **recommande pour equipe**
-- `AES`   : chiffre, mot de passe requis au boot WinPE - 1 operateur seulement
+- **Suivi** — déploiements en cours, en temps réel, phase 1 et phase 2.
+- **Statistiques** — volumes par jour / semaine / mois / année, durées, avec pagination et purge.
+- **Catalogue** — applications déployables (winget / choco / exe-msi).
+- **Séquences** — visualisation et édition des séquences de post-installation.
+- **Scripts & Drivers** — exploration des partages.
 
-## Sequences de deploiement
+Le mot de passe administrateur est stocké sous forme de **hash scrypt** (jamais en clair, ni dans la configuration ni dans les logs).
 
-Format PSD1 - exemple `Win11-Domaine.psd1` :
+---
+
+## Séquences de post-installation
+
+Une séquence est un fichier `.psd1` décrivant les étapes de la phase 2. Exemple minimal :
 
 ```powershell
 @{
-    Id      = 'win11-domaine'
-    Name    = 'Windows 11 Pro - Poste domaine'
-    Version = '1.0.0'
-    Metadata = @{
-        OS       = 'Windows 11 Pro'
-        Locale   = 'fr-FR'
-        Domain   = 'corp.local'
-        Timezone = 'Romance Standard Time'
-    }
+    Id   = 'ts-exemple'
+    Name = 'Poste standard'
+    Metadata = @{ Os = 'Windows'; Locale = 'fr-FR' }
     Steps = @(
-        @{ Id='s01'; Type='FormatDisk'; Params=@{ DiskNumber=-1; FirmwareType='UEFI' } }
-        @{ Id='s02'; Type='ApplyWIM';   Params=@{ WimPath='\\S-PS-DEP-1\Images\Win11.wim'; Index=1 } }
-        @{ Id='s03'; Type='JoinDomain'; Params=@{ Domain='corp.local' } }
-        @{ Id='s04'; Type='InstallUpdates' }
-        @{ Id='s05'; Type='InstallApps'; Params=@{ Apps=@('7zip','chrome') } }
+        @{ Id = 'pi-01'; Type = 'WaitForNetwork'; Name = 'Attendre le réseau'; Enabled = $true }
+        @{ Id = 'pi-02'; Type = 'JoinDomain';     Name = 'Jonction domaine';   Enabled = $true }
+        @{ Id = 'pi-03'; Type = 'InstallSoftware'; Name = 'Logiciels';         Enabled = $true; Params = @{ Source = '\\SERVEUR\Logiciels' } }
+        @{ Id = 'pi-04'; Type = 'RunScript';      Name = 'Réglages';           Enabled = $true; Params = @{ Path = '\\SERVEUR\Scripts\Config.ps1' } }
     )
 }
 ```
 
-Deposer dans `\\S-PS-DEP-1\Deploy\Sequences\`
+Les séquences peuvent être **génériques**, ou **nominatives** (par nom de machine ou par adresse MAC), et résolues automatiquement au déploiement. Des modèles prêts à l'emploi sont fournis dans `Sequences/`.
 
-**Types de steps disponibles :**
+---
 
-| Type | Description |
-|------|-------------|
-| `FormatDisk` | Partitionner (UEFI ou BIOS). DiskNumber=-1 = choix au boot |
-| `ApplyWIM` | Appliquer une image Windows |
-| `JoinDomain` | Joindre Active Directory |
-| `InstallUpdates` | Windows Update |
-| `InstallApps` | Applications depuis catalogue |
-| `RunScript` | Script PowerShell post-deploiement |
-| `SetLocalAdmin` | Definir mot de passe administrateur local |
-| `InjectDrivers` | Drivers depuis `\\S-PS-DEP-1\Drivers\FABRICANT\MODELE\` |
-| `Reboot` | Redemarrer avec compteur |
-| `WaitNetwork` | Attendre la connectivite reseau |
+## Sécurité
 
-## Console d'administration
+- **Secrets** isolés dans un vault (clair protégé par les droits SMB, ou chiffré AES).
+- **API** protégée par token ; les écritures exigent l'en-tête correspondant.
+- **Interface web** : secrets côté serveur uniquement, session par cookie httpOnly, mot de passe admin haché (scrypt).
+- **HTTPS optionnel** sur l'API (certificat auto-signé généré depuis la console, ou fourni) pour chiffrer le trafic.
+
+---
+
+## Structure du dépôt
 
 ```
-PSWinDeploy-Console.ps1
-  [D] Gerer les sequences    Creer/editer des sequences .psd1
-  [W] Construire le WinPE    Build ISO/PXE avec packages et drivers
-  [E] Exporter une image WIM Depuis un ISO Windows monte
-  [S] Sante du systeme       Rapport ADK, partages, vault, WDS
-  [V] Drivers                Structure, inventaire, verification
-  [L] Journaux               Consulter, rechercher, nettoyer
-  [N] Notifications          Mail et Teams Webhook
-  [M] Mise a jour            Depuis archive .zip ou dossier
-  [U] Debloquer les scripts  Supprimer Zone.Identifier
-  [I] Re-initialiser         Relancer Initialize
+PSWinDeploy/
+├── Initialize-PSWinDeploy.ps1   Assistant d'installation
+├── PSWinDeploy-Console.ps1      Console d'administration
+├── PSWinDeploy.psd1             Configuration générée
+├── API/                         API REST (Pode)
+├── Modules/                     Modules PowerShell (moteur, WinPE, drivers…)
+├── Scripts/                     Start-Deploy, build WinPE, utilitaires
+├── Sequences/                   Séquences de post-installation (modèles inclus)
+├── Catalogue/                   Catalogue d'applications
+├── Web/                         Interface web (frontend React + backend Node, Docker)
+└── Docs/                        Documentation détaillée
 ```
 
-## Build WinPE
+---
 
-```powershell
-# Depuis la console [W] ou directement :
-E:\PSWinDeploy\Build-WinPE.ps1
-```
+## Documentation
 
-L'assistant Build-WinPE :
-1. Locale et architecture (fr-FR / amd64)
-2. Packages (WMI, NetFx, Scripting, PowerShell, StorageWMI, EnhancedStorage)
-3. Drivers reseau/stockage depuis `\\S-PS-DEP-1\Drivers\WinPE\`
-4. Vault WinPE (mode Plain recommande)
-5. Chemin workspace et ISO de sortie
+Une documentation détaillée est disponible dans [`Docs/`](Docs/) (architecture API/web, types d'étapes, guides de séquences, débogage). Une refonte avec un site dédié est prévue.
 
-**Resultat :** `E:\PSWinDeploy\WinPE\ISO\WinPE-amd64.iso`
+---
 
-Contenu du WIM injecte :
-```
-X:\Deploy\
-  Scripts\Start-Deploy.ps1
-  Modules\NetShare\, Config\, TaskSequence\, ...
-  secrets.vault.psd1
-```
+## Statut & feuille de route
 
-## Flux de deploiement WinPE
+PSWinDeploy est en développement actif. Quelques pistes envisagées :
 
-```
-Boot ISO/PXE
-  ??? startnet.cmd
-        ??? wpeutil SetKeyboardLocale fr-FR
-        ??? Start-Deploy.ps1 -NetworkShare \\S-PS-DEP-1\Deploy
-              ??? Connexion SMB (svc-winpe via vault)
-              ?     Fallback automatique sur IP si DNS absent
-              ??? Liste \\S-PS-DEP-1\Deploy\Sequences\*.psd1
-              ??? Operateur choisit la sequence
-              ??? Si DiskNumber=-1 : operateur choisit le disque
-              ??? Execution sequence step par step
-```
+- Mode « en attente » en phase 2 : pousser une séquence à la volée depuis l'interface vers un poste qui attend.
+- Suppression/édition de séquences depuis l'interface.
+- Authentification OIDC pour l'interface web.
+- Internationalisation.
 
-## Structure des partages SMB
+---
 
-```
-\\S-PS-DEP-1\
-  Images\       *.wim  (images Windows a deployer)
-  Deploy\
-    Sequences\  *.psd1 (sequences de deploiement)
-    Modules\    modules PS copies depuis le serveur
-    Logs\       journaux de deploiement
-  Drivers\
-    WinPE\Net\     drivers NIC pour WinPE
-    WinPE\Storage\ drivers NVMe/SATA pour WinPE
-    WinPE\Sys\     drivers chipset/USB pour WinPE
-    Dell\MODELE\   drivers OS complets par modele
-    HP\MODELE\
-    Lenovo\MODELE\
-  Logiciels\    installeurs apps (.msi, .exe)
-  Scripts\      scripts post-deploiement
-  Logs\         journaux centralises
-```
+## Licence
 
-## Mise a jour
+À définir.
 
-```powershell
-# Option 1 : depuis le dossier source extrait
-E:\PSWinDeploy_v0.6.9\PSWinDeploy\Update-PSWinDeploy.ps1
-# -> Detecte l'installation automatiquement
+---
 
-# Option 2 : depuis l'installation
-E:\PSWinDeploy\Update-PSWinDeploy.ps1 -ArchivePath 'D:\PSWinDeploy_v0.6.9.zip'
-
-# Option 3 : depuis la console [M]
-
-# Modes :
-# [1] Tout mettre a jour (recommande) - force la copie de tous les fichiers
-# [2] Composant par composant
-# [3] Simulation (DryRun)
-```
-
-**Fichiers JAMAIS ecrases :** `PSWinDeploy.psd1`, `secrets.vault.psd1`, `Shares\`, `Profiles\`
-
-## Depannage
-
-### WinPE ne se connecte pas aux partages
-
-```cmd
-# Depuis la console debug WinPE :
-ping 10.0.8.111                              # IP du serveur
-net use \\10.0.8.111\Deploy                  # Test manuel
-powershell -c "Test-NetConnection 10.0.8.111 -Port 445"
-```
-
-Causes frequentes :
-- Pare-feu Windows sur le serveur bloquant le port 445
-- Partage `Deploy` non cree (relancer Initialize)
-- Compte `svc-winpe` expire ou verrouille
-
-### copype.cmd echoue
-
-Verifier que le **WinPE Add-on** est installe (pas seulement l'ADK) :
-```
-C:\Program Files (x86)\Windows Kits\10\...\Windows Preinstallation Environment\amd64\
-```
-Si absent : reinstaller depuis https://learn.microsoft.com/windows-hardware/get-started/adk-install
-
-### Get-NetAdapter absent en WinPE
-
-Normal - ce module n'existe pas en WinPE. PSWinDeploy utilise WMI + ipconfig a la place.
-
-### Encodage AZERTY au boot WinPE
-
-Rebuild le WinPE - l'assistant configure `wpeutil SetKeyboardLocale fr-FR` dans `startnet.cmd`.
-
-## Versions
-
-| Version | Date | Changements principaux |
-|---------|------|----------------------|
-| 0.6.9 | 2026-06 | New-SmbMapping, vault PSD1, AZERTY WinPE, fallback IP, sequences PSD1 |
-| 0.6.5 | 2026-06 | Unblock-PSWinDeploy, Update-PSWinDeploy, menu Drivers |
-| 0.6.0 | 2026-06 | Fix copype DandISetEnv, MakeWinPEMedia, encodage DISM FR |
-| 0.5.0 | 2026-05 | Version initiale publique |
+<p align="center"><sub>PSWinDeploy — déploiement Windows en PowerShell, sans MDT.</sub></p>
