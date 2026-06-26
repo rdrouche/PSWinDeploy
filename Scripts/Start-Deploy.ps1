@@ -636,11 +636,12 @@ function Invoke-ScratchWizard {
         if (-not (Test-Path $sdMod)) { $sdMod = Join-Path (Split-Path $PSScriptRoot -Parent) 'Modules\SimpleDeploy\SimpleDeploy.psm1' }
         Import-Module $sdMod -Force
 
-        # Charger TaskEngine pour Send-DeployReport (suivi P1 vers l'API web).
-        # Optionnel : si absent, le deploiement continue sans suivi.
+        # Charger le module LEGER DeployReport (Send-DeployReport) pour le suivi
+        # P1 vers l'API. Pas besoin de tout TaskEngine ici. Optionnel : si absent,
+        # le deploiement continue sans suivi.
         try {
-            $teMod = Join-Path $modulesDir 'TaskEngine\TaskEngine.psm1'
-            if (Test-Path $teMod) { Import-Module $teMod -Force -EA SilentlyContinue }
+            $drMod = Join-Path $modulesDir 'DeployReport\DeployReport.psm1'
+            if (Test-Path $drMod) { Import-Module $drMod -Force -Global -EA SilentlyContinue }
         } catch {}
 
         # Construire les parametres unattend (sauf si skip)
@@ -770,15 +771,17 @@ function Invoke-ScratchWizard {
         # joignable. On construit l'URL depuis la config et on passe l'URL en
         # parametre (pas de C:\Deploy\Runtime en P1). Silencieux si injoignable.
         $p1ApiUrl = ''
+        $p1ApiTok = ''
         try {
             $p1Host = ''
             if ($projCfg.ContainsKey('WinPEShareServerIP') -and $projCfg['WinPEShareServerIP']) { $p1Host = "$($projCfg['WinPEShareServerIP'])" }
             elseif ($srvName) { $p1Host = $srvName }
             $p1Port = if ($projCfg.ContainsKey('ApiPort') -and $projCfg['ApiPort']) { $projCfg['ApiPort'] } else { 8080 }
             if ($p1Host) { $p1ApiUrl = "http://${p1Host}:${p1Port}" }
+            if ($projCfg.ContainsKey('apiToken') -and $projCfg['apiToken']) { $p1ApiTok = "$($projCfg['apiToken'])" }
         } catch {}
         if ($p1ApiUrl -and (Get-Command Send-DeployReport -EA SilentlyContinue)) {
-            Send-DeployReport -ApiUrl $p1ApiUrl -Status 'running' -Step 'WinPE-Deploy' -Percent 10 -Message 'Phase 1 : preparation disque et application image'
+            Send-DeployReport -ApiUrl $p1ApiUrl -ApiToken $p1ApiTok -Status 'running' -Step 'WinPE-Deploy' -Percent 10 -Message 'Phase 1 : preparation disque et application image'
         }
 
         # Drivers : le modele a DEJA ete choisi a l'etape 5 (avant le disque).
@@ -791,7 +794,7 @@ function Invoke-ScratchWizard {
 
         # SUIVI P1 : phase 1 terminee, on va rebooter vers Windows (P2).
         if ($p1ApiUrl -and (Get-Command Send-DeployReport -EA SilentlyContinue)) {
-            Send-DeployReport -ApiUrl $p1ApiUrl -Status 'rebooting' -Step 'WinPE-Done' -Percent 50 -Message 'Phase 1 terminee : redemarrage vers Windows'
+            Send-DeployReport -ApiUrl $p1ApiUrl -ApiToken $p1ApiTok -Status 'rebooting' -Step 'WinPE-Done' -Percent 45 -Message 'OS applique : redemarrage vers Windows (phase 2)'
         }
 
         # Retourner un marqueur : le flux principal ne doit PAS lancer la TaskSequence
@@ -1036,7 +1039,7 @@ try {
     # -- Mode assistant post-install SEUL (fenetre visible, lance par la phase 2) --
     if ($PostInstallWizard) {
         Write-Step "Assistant post-installation"
-        foreach ($m in @('Hooks','NetShare','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','SimpleDeploy','PostInstall')) {
+        foreach ($m in @('DeployReport','Hooks','NetShare','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','SimpleDeploy','PostInstall')) {
             try { Import-DeployModule $m } catch { Write-Warn "Module $m : $_" }
         }
         # Config deja chargee + chemins resolus (singleton). On LIT, point.
@@ -1137,7 +1140,7 @@ try {
 
     # -- Import des modules locaux (dans le WIM) --
     Write-Step "Chargement des modules..."
-    foreach ($m in @('Hooks','WinPE-Builder','WIM-Manager','DiskSelector','DriverManager','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
+    foreach ($m in @('DeployReport','Hooks','WinPE-Builder','WIM-Manager','DiskSelector','DriverManager','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
         try {
             Import-DeployModule $m
             if ($Resume) { Add-Content $bootTrace "  Module charge : $m" -EA SilentlyContinue }

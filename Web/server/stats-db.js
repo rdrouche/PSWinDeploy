@@ -27,11 +27,19 @@ export function initDb(sqlitePath) {
       end_ts        TEXT,                 -- ISO 8601
       duration_sec  INTEGER,
       events        INTEGER,
+      hidden        INTEGER NOT NULL DEFAULT 0,  -- 1 = masque (supprime cote GUI)
       updated_at    INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_dep_end ON deployments(end_ts);
     CREATE INDEX IF NOT EXISTS idx_dep_completed ON deployments(completed);
   `)
+  // Migration douce : ajoute la colonne hidden si une ancienne base ne l'a pas.
+  try {
+    const cols = db.prepare("PRAGMA table_info(deployments)").all()
+    if (!cols.some(c => c.name === "hidden")) {
+      db.exec("ALTER TABLE deployments ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+    }
+  } catch {}
   return db
 }
 
@@ -42,9 +50,9 @@ export function upsertDeployments(list) {
   if (!db || !Array.isArray(list) || list.length === 0) return 0
   const stmt = db.prepare(`
     INSERT INTO deployments
-      (id, computer_name, mac, status, completed, start_ts, end_ts, duration_sec, events, updated_at)
+      (id, computer_name, mac, status, completed, start_ts, end_ts, duration_sec, events, hidden, updated_at)
     VALUES
-      (@id, @computer_name, @mac, @status, @completed, @start_ts, @end_ts, @duration_sec, @events, @updated_at)
+      (@id, @computer_name, @mac, @status, @completed, @start_ts, @end_ts, @duration_sec, @events, 0, @updated_at)
     ON CONFLICT(id) DO UPDATE SET
       computer_name = excluded.computer_name,
       mac           = excluded.mac,
@@ -55,6 +63,8 @@ export function upsertDeployments(list) {
       duration_sec  = excluded.duration_sec,
       events        = excluded.events,
       updated_at    = excluded.updated_at
+    -- NB : 'hidden' n'est PAS reinitialise ici. Une ligne masquee (supprimee
+    -- cote GUI) le reste meme si la sync la retrouve dans l'API.
   `)
   const now = Date.now()
   const tx = db.transaction((rows) => {
@@ -90,12 +100,12 @@ export function computeStats() {
   const iso = (d) => d.toISOString()
 
   const countSince = db.prepare(
-    "SELECT COUNT(*) AS n FROM deployments WHERE completed = 1 AND end_ts >= ?"
+    "SELECT COUNT(*) AS n FROM deployments WHERE completed = 1 AND hidden = 0 AND end_ts >= ?"
   )
-  const total = db.prepare("SELECT COUNT(*) AS n FROM deployments WHERE completed = 1").get().n
+  const total = db.prepare("SELECT COUNT(*) AS n FROM deployments WHERE completed = 1 AND hidden = 0").get().n
   const dur = db.prepare(`
     SELECT AVG(duration_sec) AS avg, MIN(duration_sec) AS min, MAX(duration_sec) AS max
-    FROM deployments WHERE completed = 1 AND duration_sec IS NOT NULL
+    FROM deployments WHERE completed = 1 AND hidden = 0 AND duration_sec IS NOT NULL
   `).get()
 
   return {
@@ -113,10 +123,11 @@ export function computeStats() {
 // Liste paginee des deploiements termines. Retourne { rows, total }.
 export function listCompleted({ limit = 25, offset = 0 } = {}) {
   if (!db) return { rows: [], total: 0 }
-  const total = db.prepare("SELECT COUNT(*) AS n FROM deployments").get().n
+  const total = db.prepare("SELECT COUNT(*) AS n FROM deployments WHERE hidden = 0").get().n
   const rows = db.prepare(`
     SELECT id, computer_name, mac, status, completed, start_ts, end_ts, duration_sec, events
     FROM deployments
+    WHERE hidden = 0
     ORDER BY end_ts DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset)
@@ -136,11 +147,12 @@ export function listCompleted({ limit = 25, offset = 0 } = {}) {
   }
 }
 
-// Supprime un deploiement par id (suppression manuelle). Retourne le nb de
-// lignes supprimees (0 ou 1).
+// "Supprime" un deploiement = le masque (hidden=1). La ligne reste en base
+// (l'historique de l'API est preserve) mais disparait de la GUI, et la sync ne
+// la re-affichera pas. Retourne le nb de lignes affectees (0 ou 1).
 export function deleteDeployment(id) {
   if (!db || !id) return 0
-  const info = db.prepare("DELETE FROM deployments WHERE id = ?").run(String(id))
+  const info = db.prepare("UPDATE deployments SET hidden = 1 WHERE id = ?").run(String(id))
   return info.changes
 }
 

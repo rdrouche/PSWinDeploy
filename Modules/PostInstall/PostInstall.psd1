@@ -5,5 +5,5 @@
     Author            = 'PSWinDeploy'
     Description       = 'Assistant de post-installation (phase 2) : sequence par MAC ou construction interactive.'
     PowerShellVersion = '5.1'
-    FunctionsToExport = @('Get-PrimaryMacAddress','Resolve-PostInstallSequence','New-PostInstallSequenceFromTemplate','Show-PostInstallWizard','Select-TemplateSequence','Build-SequenceInteractive','Set-DeployApiEndpoint')
+    FunctionsToExport = @('Get-PrimaryMacAddress','Resolve-PostInstallSequence','New-PostInstallSequenceFromTemplate','Show-PostInstallWizard','Select-TemplateSequence','Build-SequenceInteractive')
 }

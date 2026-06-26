@@ -448,9 +448,19 @@ function Write-DeployReport {
     #>
     param([Parameter(Mandatory)][hashtable]$Report)
 
-    $id = "$($Report['computerName'])"
-    if (-not $id) { $id = "$($Report['mac'])" }
-    if (-not $id) { $id = "unknown-$(Get-Random -Maximum 99999)" }
+    # IDENTIFIANT STABLE = la MAC. Elle est unique par machine et CONSTANTE de
+    # la phase 1 (WinPE) a la phase 2 (Windows renomme). On NE se base PAS sur
+    # le nom : en WinPE il vaut MINWINPC pour toutes les machines (collision),
+    # et il change au renommage entre P1 et P2 (creerait deux deploiements).
+    # Le nom est conserve comme simple attribut d'affichage.
+    $mac = "$($Report['mac'])" -replace '[^A-Za-z0-9]', ''
+    if ($mac) {
+        $id = $mac
+    } else {
+        # Pas de MAC : repli sur le nom (hors WinPE), sinon identifiant aleatoire.
+        $id = "$($Report['computerName'])"
+        if (-not $id -or $id -eq 'MINWINPC') { $id = "unknown-$(Get-Random -Maximum 99999)" }
+    }
     $id = $id -replace '[^A-Za-z0-9_-]', '_'
 
     if (-not $Report.ContainsKey('timestamp')) { $Report['timestamp'] = (Get-Date -Format 'o') }
@@ -505,10 +515,21 @@ function Get-DeployCompleted {
         $durationSec = $null
         if ($start -and $end) { $durationSec = [math]::Round(($end - $start).TotalSeconds) }
 
+        # Nom affiche : le DERNIER nom reel connu (apres renommage en P2). On
+        # ignore le nom generique WinPE 'MINWINPC'. Si jamais nomme, on retombe
+        # sur la MAC.
+        $displayName = ''
+        for ($k = $events.Count - 1; $k -ge 0; $k--) {
+            $cn = "$($events[$k].computerName)"
+            if ($cn -and $cn -ne 'MINWINPC') { $displayName = $cn; break }
+        }
+        $macVal = "$($last.mac)"; if (-not $macVal) { $macVal = "$($first.mac)" }
+        if (-not $displayName) { $displayName = $macVal }
+
         $result += [PSCustomObject]@{
             Id           = $f.BaseName -replace '^history-', ''
-            ComputerName = "$($first.computerName)"
-            Mac          = "$($first.mac)"
+            ComputerName = $displayName
+            Mac          = $macVal
             Status       = if ($done) { 'done' } else { "$($last.status)" }
             Completed    = [bool]$done
             Start        = if ($start) { $start.ToString('o') } else { $null }

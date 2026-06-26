@@ -843,7 +843,6 @@ function StatsPage({ toast }) {
               </div>
               </>
             )}
-            )}
           </div>
         </>
       )}
