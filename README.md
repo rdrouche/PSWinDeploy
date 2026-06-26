@@ -72,7 +72,7 @@ Le déploiement est découpé en deux temps distincts, ce qui simplifie le débo
 | Module Pode | 2.13+ | API REST (installé automatiquement) |
 | Docker | — | Interface web (optionnelle) |
 
-ADK : <https://learn.microsoft.com/windows-hardware/get-started/adk-install> — cocher **Deployment Tools** + **Windows PE Add-on**.
+ADK est requis
 
 ---
 
@@ -201,10 +201,5 @@ PSWinDeploy est en développement actif. Quelques pistes envisagées :
 
 ---
 
-## Licence
-
-À définir.
-
----
 
 <p align="center"><sub>PSWinDeploy — déploiement Windows en PowerShell, sans MDT.</sub></p>
