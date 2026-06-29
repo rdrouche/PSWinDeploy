@@ -176,6 +176,7 @@ function Show-PostInstallWizard {
     $choice = Show-PSWDList -Title "Menu de deploiement -- Que souhaitez-vous faire ?" -Items @(
         'Partir d''un modele de sequence',
         'Construire a la volee (applications / MAJ / scripts)',
+        'Attendre une sequence poussee depuis l''interface web',
         'Terminer le deploiement (nettoie C:\Deploy, garde Logs)',
         'Quitter SANS nettoyer (laisse C:\Deploy intact)'
     )
@@ -184,11 +185,18 @@ function Show-PostInstallWizard {
         0 { return (Select-TemplateSequence -SeqDir $SeqDir) }
         1 { return (Build-SequenceInteractive -RuntimeDir $RuntimeDir -ScriptShare $ScriptShare -SoftwareShare $SoftwareShare -CatalogueShare $CatalogueShare) }
         2 {
+            # Mode "en attente" : le poste va poller l'API et jouer la sequence
+            # poussee depuis l'interface web. La boucle d'attente est geree par
+            # l'appelant (Start-Deploy), qui dispose de l'URL/token API.
+            Write-PILog "Mode attente : en attente d'une sequence depuis l'interface web." 'STEP'
+            return @{ __action = 'wait-web' }
+        }
+        3 {
             # Terminer = nettoyer (comportement par defaut souhaite)
             Invoke-PostInstallCleanup
             return @{ __action = 'done-cleaned' }
         }
-        3 {
+        4 {
             Write-PILog "Quitter sans nettoyer : C:\Deploy laisse intact." 'INFO'
             return @{ __action = 'done-nocleanup' }
         }

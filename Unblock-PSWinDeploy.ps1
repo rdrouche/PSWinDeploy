@@ -94,5 +94,5 @@ Write-Host ""
 Write-Host "  Conseil : pour eviter ce probleme a l'avenir," -ForegroundColor DarkGray
 Write-Host "  debloquer le .zip avant d'extraire :" -ForegroundColor DarkGray
 Write-Host "    Clic-droit sur le .zip -> Proprietes -> Debloquer" -ForegroundColor DarkGray
-Write-Host "    Ou : Unblock-File 'PSWinDeploy_v0.6.4.zip'" -ForegroundColor Gray
+Write-Host "    Ou : Unblock-File 'PSWinDeploy_v0.7.0.zip'" -ForegroundColor Gray
 Write-Host ""

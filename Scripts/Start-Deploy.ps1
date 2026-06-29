@@ -811,7 +811,20 @@ function Invoke-ScratchWizard {
 }
 
 function Write-Banner {
-    $v = '0.2.0'
+    # Version lue dynamiquement depuis le fichier VERSION (source unique).
+    # En WinPE/deploiement, le projet peut etre a divers emplacements : on teste
+    # plusieurs chemins. Fallback sur la derniere version connue.
+    $v = '0.7.0'
+    foreach ($vf in @(
+        (Join-Path $PSScriptRoot '..\VERSION'),
+        (Join-Path $PSScriptRoot '..\..\VERSION'),
+        'X:\Deploy\VERSION',
+        'C:\Deploy\VERSION'
+    )) {
+        if (Test-Path $vf -EA SilentlyContinue) {
+            try { $v = (Get-Content $vf -Raw -EA Stop).Trim(); break } catch {}
+        }
+    }
 
 # =============================================================================
 # ASSISTANT FROM SCRATCH -- WinPE interactif style MDT
@@ -1054,6 +1067,40 @@ try {
         while (-not $wizardDone) {
             try {
                 $built = Show-PostInstallWizard -SeqDir $seqShare -RuntimeDir 'C:\Deploy\Runtime' -ScriptShare $scriptShare -SoftwareShare $softwareShare -CatalogueShare $catalogueShare
+
+                # MODE ATTENTE WEB : le poste s'enregistre "en attente" et poll
+                # l'API jusqu'a recevoir une sequence poussee depuis l'interface.
+                # A reception, on l'ecrit en local et on bascule sur le flux
+                # normal (comme une sequence construite a la volee).
+                if ($built -is [hashtable] -and $built.ContainsKey('__action') -and $built['__action'] -eq 'wait-web') {
+                    $apiHost = Get-Cfg 'WinPEShareServerIP'
+                    if ([string]::IsNullOrWhiteSpace($apiHost)) { $apiHost = Get-Cfg 'WinPEShareServer' }
+                    $apiPort = Get-Cfg 'ApiPort'; if (-not $apiPort) { $apiPort = 8080 }
+                    $apiTok  = "$(Get-Cfg 'apiToken')"
+                    $apiUrl  = if ($apiHost) { "http://${apiHost}:${apiPort}" } else { '' }
+
+                    if (-not $apiUrl -or -not (Get-Command Register-DeployWaiting -EA SilentlyContinue)) {
+                        Write-Warn "Mode attente indisponible (API non configuree). Retour au menu."
+                        $built = $null
+                    } else {
+                        $mac = Get-DeployClientMac
+                        Write-Info "En attente d'une sequence depuis l'interface web (MAC $mac)."
+                        Write-Info "Pousse une sequence depuis la page Suivi. Ctrl+C pour annuler."
+                        $pending = $null
+                        while (-not $pending) {
+                            Register-DeployWaiting -ApiUrl $apiUrl -ApiToken $apiTok -Mac $mac | Out-Null
+                            Start-Sleep -Seconds 6
+                            $pending = Get-DeployPending -ApiUrl $apiUrl -ApiToken $apiTok -Mac $mac
+                        }
+                        Write-OK "Sequence recue : $($pending.Label)"
+                        # Ecrire la sequence poussee en local et basculer sur le flux normal.
+                        New-Item -ItemType Directory 'C:\Deploy\Runtime' -Force -EA SilentlyContinue | Out-Null
+                        $utf8Bom = New-Object System.Text.UTF8Encoding $true
+                        [System.IO.File]::WriteAllText('C:\Deploy\Runtime\sequence.psd1', $pending.SequenceText, $utf8Bom)
+                        $built = 'C:\Deploy\Runtime\sequence.psd1'
+                    }
+                }
+
                 if ($built -is [hashtable] -and $built.ContainsKey('__action')) {
                     # L'utilisateur a choisi de terminer (avec ou sans nettoyage).
                     # DESARMER le mode deploiement : autologon OFF + tache supprimee.
@@ -1289,6 +1336,20 @@ try {
             }
             Write-OK "Sequence phase 2 : $SequencePath"
             Write-Host ""
+            # SUIVI : deposer les coordonnees de l'API (URL + token) AVANT de
+            # lancer le moteur, pour que Send-DeployReport envoie les heartbeats.
+            # Necessaire aussi sur ce chemin (sequence by-name / by-mac / _default
+            # resolue directement, sans passer par l'assistant interactif) : sans
+            # ca, api-url.txt n'existe pas -> aucun heartbeat n'etait envoye.
+            if (Get-Command Set-DeployApiEndpoint -EA SilentlyContinue) {
+                $apiHost = Get-Cfg 'WinPEShareServerIP'
+                if ([string]::IsNullOrWhiteSpace($apiHost)) { $apiHost = Get-Cfg 'WinPEShareServer' }
+                $apiPort = Get-Cfg 'ApiPort'; if (-not $apiPort) { $apiPort = 8080 }
+                $apiTok  = "$(Get-Cfg 'apiToken')"
+                if ($apiHost) {
+                    Set-DeployApiEndpoint -ApiUrl "http://${apiHost}:${apiPort}" -ApiToken "$apiTok" -RuntimeDir 'C:\Deploy\Runtime'
+                }
+            }
             # LE MOTEUR : deroule la sequence, dispatche, gere reboot/reprise.
             $engResult = Invoke-Engine -SequencePath $SequencePath -Context $engineCtx -Resume -PhaseFilter 'Windows'
             # Si le moteur a reboote, le process s'arrete avant ici. S'il revient,

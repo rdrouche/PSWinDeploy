@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'PostInstall.psm1'
-    ModuleVersion     = '1.0.0'
+    ModuleVersion     = '0.7.0'
     GUID              = 'c3d5f7b9-2468-3579-abcd-ef0123456789'
     Author            = 'PSWinDeploy'
     Description       = 'Assistant de post-installation (phase 2) : sequence par MAC ou construction interactive.'

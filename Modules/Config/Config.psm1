@@ -15,12 +15,42 @@
 Set-StrictMode -Version Latest
 
 # -----------------------------------------------------------------------------
+# VERSION -- source unique de verite : le fichier VERSION a la racine du projet.
+# Get-PSWDVersion le lit (avec cache + fallback) pour que l'affichage de la
+# version soit dynamique partout (console, API, assistant) sans hardcode.
+# -----------------------------------------------------------------------------
+$script:CachedVersion = $null
+function Get-PSWDVersion {
+    <# .SYNOPSIS Retourne la version du projet, lue depuis le fichier VERSION.
+       Cherche le fichier en remontant depuis ce module. Fallback sur la valeur
+       par defaut si introuvable. Resultat mis en cache. #>
+    param([switch]$Refresh)
+    if ($script:CachedVersion -and -not $Refresh) { return $script:CachedVersion }
+    $candidates = @(
+        (Join-Path $PSScriptRoot '..\..\VERSION')        # Modules\Config\ -> racine
+        (Join-Path $PSScriptRoot '..\..\..\VERSION')     # App\Modules\Config\ -> racine install
+        (Join-Path (Get-Location) 'VERSION')
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c -EA SilentlyContinue) {
+            try {
+                $v = (Get-Content $c -Raw -EA Stop).Trim()
+                if ($v) { $script:CachedVersion = $v; return $v }
+            } catch {}
+        }
+    }
+    # Fallback : derniere version connue figee ici (mise a jour par le bump).
+    $script:CachedVersion = '0.7.0'
+    return $script:CachedVersion
+}
+
+# -----------------------------------------------------------------------------
 # VALEURS PAR DEFAUT (si aucun .psd1 trouve)
 # x86 retire -- amd64 et arm64 uniquement (ADK 2004+)
 # -----------------------------------------------------------------------------
 
 $script:Defaults = @{
-    Version          = '0.6.9'
+    Version          = '0.7.0'
     ProjectName      = 'PSWinDeploy'
 
     AdkPath          = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
@@ -282,6 +312,7 @@ function Show-PSWinDeployConfig {
 }
 
 Export-ModuleMember -Function @(
+    'Get-PSWDVersion'
     'Import-PSWinDeployConfig'
     'Get-PSWinDeployConfig'
     'Set-PSWinDeployConfig'

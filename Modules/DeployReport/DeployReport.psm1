@@ -176,7 +176,93 @@ function Send-DeployReport {
     }
 }
 
+function Get-DeployClientMac {
+    <# .SYNOPSIS Detection MAC robuste (memes 3 methodes que Send-DeployReport),
+        normalisee AABBCCDDEEFF. Factorisee pour etre reutilisee par le mode
+        attente. Retourne '' si rien trouve. #>
+    $mac = ''
+    try {
+        $cfg = Get-CimInstance Win32_NetworkAdapterConfiguration -EA SilentlyContinue |
+               Where-Object { $_.IPEnabled -and $_.MACAddress } | Select-Object -First 1
+        if ($cfg -and $cfg.MACAddress) { $mac = $cfg.MACAddress }
+    } catch {}
+    if (-not $mac) {
+        try {
+            $a = Get-CimInstance Win32_NetworkAdapter -EA SilentlyContinue |
+                 Where-Object { $_.PhysicalAdapter -and $_.MACAddress -and $_.NetEnabled } |
+                 Select-Object -First 1
+            if ($a -and $a.MACAddress) { $mac = $a.MACAddress }
+        } catch {}
+    }
+    if (-not $mac) {
+        try {
+            $na = Get-NetAdapter -EA SilentlyContinue |
+                  Where-Object { $_.Status -eq 'Up' -and $_.MacAddress } | Select-Object -First 1
+            if ($na -and $na.MacAddress) { $mac = $na.MacAddress }
+        } catch {}
+    }
+    if ($mac) { $mac = ($mac -replace '[:-]', '').ToUpper() }
+    return $mac
+}
+
+function Register-DeployWaiting {
+    <# .SYNOPSIS Le poste s'annonce "en attente" d'une sequence poussee depuis
+        l'interface web. A rappeler periodiquement (heartbeat d'attente).
+        Retourne $true si l'enregistrement a abouti. #>
+    param(
+        [Parameter(Mandatory)][string]$ApiUrl,
+        [string]$ApiToken = '',
+        [string]$Mac = ''
+    )
+    if (-not $ApiUrl) { return $false }
+    if (-not $Mac) { $Mac = Get-DeployClientMac }
+    if (-not $Mac) { return $false }
+    try {
+        $body = @{ computerName = $env:COMPUTERNAME; mac = $Mac } | ConvertTo-Json -Compress
+        $uri  = "$($ApiUrl.TrimEnd('/'))/api/deploy/waiting/$Mac"
+        if ($uri -like 'https:*') {
+            try { [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true } } catch {}
+        }
+        $headers = @{}
+        if ($ApiToken) { $headers['X-Deploy-Token'] = "$ApiToken".Trim() }
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -Headers $headers -TimeoutSec 5 -EA Stop | Out-Null
+        return $true
+    } catch { return $false }
+}
+
+function Get-DeployPending {
+    <# .SYNOPSIS Le poste demande s'il a une sequence en attente. Retourne un
+        objet { Label; SequenceText } si une sequence a ete poussee, sinon $null. #>
+    param(
+        [Parameter(Mandatory)][string]$ApiUrl,
+        [string]$ApiToken = '',
+        [string]$Mac = ''
+    )
+    if (-not $ApiUrl) { return $null }
+    if (-not $Mac) { $Mac = Get-DeployClientMac }
+    if (-not $Mac) { return $null }
+    try {
+        $uri = "$($ApiUrl.TrimEnd('/'))/api/deploy/pending/$Mac"
+        if ($uri -like 'https:*') {
+            try { [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true } } catch {}
+        }
+        $headers = @{}
+        if ($ApiToken) { $headers['X-Deploy-Token'] = "$ApiToken".Trim() }
+        $resp = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers -TimeoutSec 5 -EA Stop
+        if ($resp -and $resp.success -and $resp.data) {
+            return [PSCustomObject]@{
+                Label        = $resp.data.Label
+                SequenceText = $resp.data.SequenceText
+            }
+        }
+        return $null
+    } catch { return $null }
+}
+
 Export-ModuleMember -Function @(
     'Send-DeployReport'
     'Set-DeployApiEndpoint'
+    'Register-DeployWaiting'
+    'Get-DeployPending'
+    'Get-DeployClientMac'
 )

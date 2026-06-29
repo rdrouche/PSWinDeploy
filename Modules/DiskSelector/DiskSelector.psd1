@@ -1,5 +1,5 @@
 ﻿@{
-    ModuleVersion     = '0.2.0'
+    ModuleVersion     = '0.7.0'
     GUID              = 'a1b2c3d4-0004-0004-0004-000000000004'
     Author            = 'PSWinDeploy'
     Description       = 'Assistant interactif de selection de disque pour WinPE'

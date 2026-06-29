@@ -517,22 +517,36 @@ function Get-DeployCompleted {
             return $null
         }
 
-        # GERER LES CYCLES MULTIPLES : un meme history peut contenir plusieurs
-        # deploiements (relances) -> plusieurs 'done'. On ne garde que le DERNIER
-        # cycle : on trouve le dernier 'done', et on remonte jusqu'au debut de ce
-        # cycle (l'evenement juste apres le 'done' precedent, ou le tout debut).
+        # GERER LES CYCLES MULTIPLES : un meme history (meme MAC) peut contenir
+        # plusieurs deploiements -- ex : une VM redeployee. On ne garde que le
+        # DERNIER cycle. Deux bornes possibles pour son debut :
+        #   (a) juste apres l'avant-dernier 'done' (cas relance propre), OU
+        #   (b) une COUPURE TEMPORELLE : un grand trou entre deux heartbeats
+        #       consecutifs signale un nouveau deploiement (la machine a ete
+        #       reinstallee bien plus tard). Sans ca, un 1er cycle sans 'done'
+        #       (interrompu) ferait demarrer le cycle au tout debut -> duree
+        #       absurde melangeant deux deploiements (ex : 2j au lieu de 30min).
         $doneIdx = -1
         for ($k = $events.Count - 1; $k -ge 0; $k--) {
             if ("$($events[$k].status)" -eq 'done') { $doneIdx = $k; break }
         }
-        # Debut du dernier cycle = juste apres l'avant-dernier 'done'.
+        $cycleEnd = if ($doneIdx -ge 0) { $doneIdx } else { $events.Count - 1 }
+
+        # Debut du dernier cycle : on remonte depuis $cycleEnd et on s'arrete au
+        # premier des deux signaux rencontres : un 'done' anterieur (fin du cycle
+        # precedent) OU un saut temporel > seuil (nouveau deploiement).
+        $GAP_SECONDS = 3600   # 1h de trou entre heartbeats = nouveau deploiement
         $cycleStart = 0
-        if ($doneIdx -ge 0) {
-            for ($k = $doneIdx - 1; $k -ge 0; $k--) {
-                if ("$($events[$k].status)" -eq 'done') { $cycleStart = $k + 1; break }
+        for ($k = $cycleEnd; $k -gt 0; $k--) {
+            # Coupure si l'evenement precedent est un 'done' (cycle d'avant).
+            if ("$($events[$k-1].status)" -eq 'done') { $cycleStart = $k; break }
+            # Coupure si grand ecart temporel entre k-1 et k.
+            $tPrev = & $parseTs $events[$k-1].timestamp
+            $tCur  = & $parseTs $events[$k].timestamp
+            if ($tPrev -and $tCur -and (($tCur - $tPrev).TotalSeconds -gt $GAP_SECONDS)) {
+                $cycleStart = $k; break
             }
         }
-        $cycleEnd = if ($doneIdx -ge 0) { $doneIdx } else { $events.Count - 1 }
         $cycle = $events[$cycleStart..$cycleEnd]
 
         $done  = $events[$doneIdx]   # $null si pas de done

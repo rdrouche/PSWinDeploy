@@ -129,7 +129,7 @@ Clear-Host
 Write-Host ""
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host "              PSWinDeploy  --  Initialisation               " -ForegroundColor Cyan
-Write-Host "         Remplacement MDT en PowerShell moderne  v0.6.9     " -ForegroundColor Cyan
+Write-Host "         Remplacement MDT en PowerShell moderne  v0.7.0     " -ForegroundColor Cyan
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Ce script va :" -ForegroundColor White
@@ -598,7 +598,7 @@ $apiToken = New-RandomString
 $psd1Lines = @(
     '@{'
     '    # Version'
-    "    Version         = '0.6.9'"
+    "    Version         = '0.7.0'"
     "    ProjectName     = 'PSWinDeploy'"
     ''
     '    # ADK / WinPE -- x86 retire depuis ADK 2004, amd64 et arm64 uniquement'

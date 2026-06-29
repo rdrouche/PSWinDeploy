@@ -179,11 +179,23 @@ Start-PodeServer -Threads 2 {
     Import-DeployModule 'DiskSelector'
     Import-DeployModule 'PsdJson'      # conversion PSD1<->JSON
     Import-DeployModule 'ApiLogic'     # logique metier API (alignee refonte)
+    Import-DeployModule 'DeployQueue'  # file d'attente (mode "en attente")
 
     # -- Initialiser la logique API avec les chemins de la config --
     try {
         Initialize-ApiLogicFromProject -ProjectRoot $ProjectRoot
     } catch { Write-Host "Init ApiLogic : $_" -ForegroundColor Yellow }
+
+    # -- Initialiser la file d'attente (mode "en attente") APRES ApiLogic, car
+    #    elle se place a cote de l'historique (HistoryPath, rempli ci-dessus). --
+    try {
+        $apiCfg = Get-ApiConfig
+        $histParent = if ($apiCfg -and $apiCfg.HistoryPath) { Split-Path $apiCfg.HistoryPath -Parent }
+                      else { $ProjectRoot }
+        $queueDir = Join-Path $histParent 'deploy-queue'
+        Initialize-DeployQueue -Path $queueDir
+        Write-Host "DeployQueue initialise : $queueDir" -ForegroundColor DarkGray
+    } catch { Write-Host "Init DeployQueue : $_" -ForegroundColor Yellow }
 
     # =======================================================
     # ROUTES PROFILS
@@ -730,13 +742,149 @@ Start-PodeServer -Threads 2 {
     }
 
     # =======================================================
+    # MODE "EN ATTENTE" (pull interactif) -- delegue a DeployQueue
+    # =======================================================
+
+    # POST /api/deploy/waiting/:id  -- le poste s'annonce en attente (heartbeat).
+    Add-PodeRoute -Method Post -Path '/api/deploy/waiting/:id' -ScriptBlock {
+        try {
+            # Pode execute chaque route dans un runspace separe : l'etat du
+            # module n'est pas partage. On (re)initialise la file ici, comme le
+            # fait ApiLogic, en se basant sur ProjectRoot du PodeState.
+            $pr = Get-PodeState -Name 'ProjectRoot'
+            Initialize-ApiLogicFromProject -ProjectRoot $pr
+            try {
+                $qcfg = Get-ApiConfig
+                $qParent = if ($qcfg -and $qcfg.HistoryPath) { Split-Path $qcfg.HistoryPath -Parent } else { $pr }
+                Initialize-DeployQueue -Path (Join-Path $qParent 'deploy-queue')
+            } catch {}
+            $id   = $WebEvent.Parameters['id']
+            $body = $WebEvent.Data
+            $cn   = if ($body.computerName) { "$($body.computerName)" } else { '' }
+            $mac  = if ($body.mac) { "$($body.mac)" } else { $id }
+            $r = Register-WaitingDeployment -Id $id -ComputerName $cn -Mac $mac
+            Write-PodeJsonResponse -Value @{ success = $true; data = $r }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # GET /api/deploy/waiting  -- liste des postes en attente (pour la GUI).
+    Add-PodeRoute -Method Get -Path '/api/deploy/waiting' -ScriptBlock {
+        try {
+            # Pode execute chaque route dans un runspace separe : l'etat du
+            # module n'est pas partage. On (re)initialise la file ici, comme le
+            # fait ApiLogic, en se basant sur ProjectRoot du PodeState.
+            $pr = Get-PodeState -Name 'ProjectRoot'
+            Initialize-ApiLogicFromProject -ProjectRoot $pr
+            try {
+                $qcfg = Get-ApiConfig
+                $qParent = if ($qcfg -and $qcfg.HistoryPath) { Split-Path $qcfg.HistoryPath -Parent } else { $pr }
+                Initialize-DeployQueue -Path (Join-Path $qParent 'deploy-queue')
+            } catch {}
+            $list = @(Get-WaitingDeployments)
+            Write-PodeJsonResponse -Value @{ success = $true; data = $list }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # POST /api/deploy/pending/:id  -- la GUI pousse une sequence vers un poste.
+    # Body : { sequenceText: '<psd1>', label: 'nom' }
+    Add-PodeRoute -Method Post -Path '/api/deploy/pending/:id' -ScriptBlock {
+        try {
+            # Pode execute chaque route dans un runspace separe : l'etat du
+            # module n'est pas partage. On (re)initialise la file ici, comme le
+            # fait ApiLogic, en se basant sur ProjectRoot du PodeState.
+            $pr = Get-PodeState -Name 'ProjectRoot'
+            Initialize-ApiLogicFromProject -ProjectRoot $pr
+            try {
+                $qcfg = Get-ApiConfig
+                $qParent = if ($qcfg -and $qcfg.HistoryPath) { Split-Path $qcfg.HistoryPath -Parent } else { $pr }
+                Initialize-DeployQueue -Path (Join-Path $qParent 'deploy-queue')
+            } catch {}
+            $id   = $WebEvent.Parameters['id']
+            $body = $WebEvent.Data
+            $txt  = "$($body.sequenceText)"
+            $lbl  = if ($body.label) { "$($body.label)" } else { '' }
+            if (-not $txt) {
+                Set-PodeResponseStatus -Code 400
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'sequenceText requis.' }
+                return
+            }
+            $r = Set-PendingSequence -Id $id -SequenceText $txt -Label $lbl
+            if ($r.Success) { Write-PodeJsonResponse -Value @{ success = $true } }
+            else {
+                Set-PodeResponseStatus -Code 409
+                Write-PodeJsonResponse -Value @{ success = $false; error = $r.Error }
+            }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # GET /api/deploy/pending/:id  -- le poste recupere sa sequence (et la consomme).
+    Add-PodeRoute -Method Get -Path '/api/deploy/pending/:id' -ScriptBlock {
+        try {
+            # Pode execute chaque route dans un runspace separe : l'etat du
+            # module n'est pas partage. On (re)initialise la file ici, comme le
+            # fait ApiLogic, en se basant sur ProjectRoot du PodeState.
+            $pr = Get-PodeState -Name 'ProjectRoot'
+            Initialize-ApiLogicFromProject -ProjectRoot $pr
+            try {
+                $qcfg = Get-ApiConfig
+                $qParent = if ($qcfg -and $qcfg.HistoryPath) { Split-Path $qcfg.HistoryPath -Parent } else { $pr }
+                Initialize-DeployQueue -Path (Join-Path $qParent 'deploy-queue')
+            } catch {}
+            $id = $WebEvent.Parameters['id']
+            $r  = Get-PendingSequence -Id $id
+            if ($r) { Write-PodeJsonResponse -Value @{ success = $true; data = $r } }
+            else    { Write-PodeJsonResponse -Value @{ success = $true; data = $null } }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # DELETE /api/deploy/waiting/:id  -- annuler l'attente d'un poste (GUI).
+    Add-PodeRoute -Method Delete -Path '/api/deploy/waiting/:id' -ScriptBlock {
+        try {
+            # Pode execute chaque route dans un runspace separe : l'etat du
+            # module n'est pas partage. On (re)initialise la file ici, comme le
+            # fait ApiLogic, en se basant sur ProjectRoot du PodeState.
+            $pr = Get-PodeState -Name 'ProjectRoot'
+            Initialize-ApiLogicFromProject -ProjectRoot $pr
+            try {
+                $qcfg = Get-ApiConfig
+                $qParent = if ($qcfg -and $qcfg.HistoryPath) { Split-Path $qcfg.HistoryPath -Parent } else { $pr }
+                Initialize-DeployQueue -Path (Join-Path $qParent 'deploy-queue')
+            } catch {}
+            $id = $WebEvent.Parameters['id']
+            $ok = Clear-WaitingDeployment -Id $id
+            Write-PodeJsonResponse -Value @{ success = [bool]$ok }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # =======================================================
     # HEALTHCHECK
     # =======================================================
 
     Add-PodeRoute -Method Get -Path '/api/health' -ScriptBlock {
+        # Version lue dynamiquement depuis le fichier VERSION (source unique).
+        $ver = '0.7.0'
+        try {
+            $vf = Join-Path (Get-PodeState -Name 'ProjectRoot') 'VERSION'
+            if (Test-Path $vf -EA SilentlyContinue) { $ver = (Get-Content $vf -Raw).Trim() }
+        } catch {}
         Write-PodeJsonResponse -Value @{
             status    = 'ok'
-            version   = '0.6.9'
+            version   = $ver
             timestamp = (Get-Date -Format 'o')
             host      = $env:COMPUTERNAME
         }

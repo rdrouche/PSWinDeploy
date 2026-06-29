@@ -241,7 +241,11 @@ function DriversPage({ toast }) {
 // ─── Page : Suivi ──────────────────────────────────────────
 function MonitorPage({ toast }) {
   const [list, setList] = useState([])
+  const [waiting, setWaiting] = useState([])
   const [loading, setLoading] = useState(true)
+  const [pushFor, setPushFor] = useState(null)   // poste cible du push (objet) ou null
+  const [seqList, setSeqList] = useState([])
+  const [busy, setBusy] = useState("")
 
   useEffect(() => {
     let stop = false
@@ -251,16 +255,53 @@ function MonitorPage({ toast }) {
     // appel avant de reprogrammer le suivant (5s apres la reponse). Si l'API est
     // lente, les requetes ne s'accumulent pas.
     async function tick() {
-      const r = await api.deployCurrent()
+      const [r, w] = await Promise.all([api.deployCurrent(), api.deployWaiting()])
       if (stop) return
       setLoading(false)
       if (r && r.success) setList(asArray(r.data))
+      if (w && w.success) setWaiting(asArray(w.data))
       timer = setTimeout(tick, 5000)
     }
     tick()
 
     return () => { stop = true; if (timer) clearTimeout(timer) }
   }, [])
+
+  // Ouvre la modale de push : charge la liste des sequences disponibles.
+  async function openPush(node) {
+    setPushFor(node)
+    const r = await api.sequences()
+    if (r && r.success) setSeqList(asArray(r.data))
+    else setSeqList([])
+  }
+
+  // Pousse une sequence existante vers le poste en attente.
+  async function doPush(seqRef) {
+    if (!pushFor) return
+    setBusy(pushFor.Id)
+    // L'API renvoie les sequences avec les champs Type et Name (majuscules).
+    const seqType = seqRef.Type || seqRef.type || "template"
+    const seqName = seqRef.Name || seqRef.name
+    // Recuperer le contenu .psd1 de la sequence choisie. La route le renvoie
+    // dans le champ "content".
+    const c = await api.sequenceContent(seqType, seqName)
+    const psd1 = c && c.success ? (c.content || c.data) : null
+    if (!psd1) {
+      setBusy(""); toast("Impossible de lire la sequence.", "err"); return
+    }
+    const r = await api.pushSequence(pushFor.Id, psd1, seqName)
+    setBusy("")
+    if (r && r.success) { toast(`Sequence poussee vers ${pushFor.ComputerName || pushFor.Id}.`); setPushFor(null) }
+    else toast((r && r.error) || "Push impossible.", "err")
+  }
+
+  async function cancelWait(node) {
+    setBusy(node.Id)
+    const r = await api.cancelWaiting(node.Id)
+    setBusy("")
+    if (r && r.success) toast("Attente annulee.")
+    else toast((r && r.error) || "Annulation impossible.", "err")
+  }
 
   const statusBadge = (s) => {
     const m = { running: "info", rebooting: "warn", waiting: "warn", done: "ok", error: "err" }
@@ -300,6 +341,71 @@ function MonitorPage({ toast }) {
             </table>
           )}
       </div>
+
+      {/* Section : postes en attente d'une sequence poussee depuis le web */}
+      <div className="panel">
+        <h2 style={{ marginTop: 0 }}>En attente de configuration</h2>
+        {waiting.length === 0 ? (
+          <div className="empty"><p>Aucun poste en attente.</p><p>Un poste apparait ici s'il choisit "Attendre une sequence" en phase 2.</p></div>
+        ) : (
+          <table>
+            <thead><tr><th>Machine</th><th>MAC</th><th>Depuis</th><th>Etat</th><th style={{ width: 220 }}></th></tr></thead>
+            <tbody>
+              {waiting.map((n, i) => (
+                <tr key={n.Id || i}>
+                  <td><b>{n.ComputerName || n.Id}</b></td>
+                  <td className="mono" style={{ fontSize: 12 }}>{n.Mac || n.Id}</td>
+                  <td style={{ fontSize: 12.5 }}>{n.Since ? new Date(n.Since).toLocaleTimeString() : "—"}</td>
+                  <td>{n.Pushed ? <span className="badge ok">sequence envoyee</span> : <span className="badge warn">en attente</span>}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                      <button className="btn sm" onClick={() => openPush(n)} disabled={busy === n.Id || n.Pushed}>Pousser une sequence</button>
+                      <button className="btn sm ghost" onClick={() => cancelWait(n)} disabled={busy === n.Id}>Annuler</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Modale : choisir la sequence a pousser */}
+      {pushFor && (
+        <div className="modal-backdrop" onClick={() => setPushFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ padding: 20 }}>
+            <div className="row" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>Pousser une sequence vers {pushFor.ComputerName || pushFor.Id}</h2>
+              <div className="spacer" />
+              <button className="btn ghost sm" onClick={() => setPushFor(null)}>Fermer</button>
+            </div>
+            <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 0 }}>
+              Choisis une sequence existante. Le poste la recevra et la jouera immediatement.
+            </p>
+            {seqList.length === 0 ? (
+              <div className="empty">
+                <p>Aucune sequence disponible.</p>
+                <p>Cree-la d'abord dans l'editeur, puis reviens la pousser.</p>
+              </div>
+            ) : (
+              <div style={{ maxHeight: 360, overflowY: "auto" }}>
+                {seqList.map((s, i) => (
+                  <div key={i} className="row" style={{ padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                                    <div>
+                      <b>{s.Name || s.name}</b>
+                      {(s.Type || s.type) && <span className="badge cat" style={{ marginLeft: 8 }}>{s.Type || s.type}</span>}
+                    </div>
+                    <div className="spacer" />
+                    <button className="btn sm" onClick={() => doPush(s)} disabled={busy === pushFor.Id}>
+                      {busy === pushFor.Id ? "Envoi..." : "Pousser"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -819,8 +925,8 @@ function StatsPage({ toast }) {
                 <thead><tr><th>Machine</th><th>Debut</th><th>Fin</th><th>Duree</th><th>Etat</th><th></th></tr></thead>
                 <tbody>
                   {completed.map((d, i) => (
-                    <tr key={d.Id || i}>
-                      <td><b>{d.ComputerName || d.Id}</b></td>
+                                    <tr key={d.Id || i}>
+                      <td><b>{d.ComputerName || d.Mac || "?"}</b></td>
                       <td style={{ fontSize: 12.5 }}>{fmtDate(d.Start)}</td>
                       <td style={{ fontSize: 12.5 }}>{fmtDate(d.End)}</td>
                       <td className="mono">{fmtDur(d.DurationSec)}</td>
@@ -862,10 +968,19 @@ const PAGES = [
   { id: "stats", label: "Statistiques", comp: StatsPage },
 ]
 
+// Petites icones (emoji, sans dependance) pour les liens de pied de page.
+const FOOT_ICONS = {
+  github: "\u{1F419}",  // poulpe (clin d'oeil GitHub)
+  kofi:   "\u2615",     // tasse de cafe
+  docs:   "\u{1F4D8}",  // livre
+  site:   "\u{1F310}",  // globe
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
   const [page, setPage] = useState("editor")
+  const [links, setLinks] = useState([])
   const [toast, toastNode] = useToast()
 
   // Au demarrage : verifier si une session valide existe deja (cookie).
@@ -873,6 +988,7 @@ export default function App() {
     (async () => {
       const r = await api.me()
       setAuthed(!!(r && r.success))
+      if (r && r.success && Array.isArray(r.links)) setLinks(r.links)
       setChecking(false)
     })()
   }, [])
@@ -904,6 +1020,16 @@ export default function App() {
         <div className="sidebar-foot">
           connecte
           <button onClick={logout}>Se deconnecter</button>
+          {links.length > 0 && (
+            <div className="foot-links">
+              {links.map((l) => (
+                <a key={l.key} href={l.url} target="_blank" rel="noopener noreferrer" title={l.label}>
+                  <span className="foot-ico">{FOOT_ICONS[l.key] || "\u2197"}</span>
+                  <span>{l.label}</span>
+                </a>
+              ))}
+            </div>
+          )}
         </div>
       </aside>
       <main className="main">

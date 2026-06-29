@@ -1,5 +1,5 @@
 ﻿@{
-    ModuleVersion     = '0.3.0'
+    ModuleVersion     = '0.7.0'
     GUID              = 'a1b2c3d4-0005-0005-0005-000000000005'
     Author            = 'PSWinDeploy'
     Description       = "Gestion des profils, autologon et securite post-deploiement"

@@ -1,5 +1,5 @@
 ﻿@{
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '0.7.0'
     GUID              = 'a1b2c3d4-0002-0002-0002-000000000002'
     Author            = 'PSWinDeploy'
     Description       = "Gestion des images WIM - capture, montage, deploiement"

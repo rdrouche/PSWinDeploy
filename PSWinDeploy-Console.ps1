@@ -148,7 +148,7 @@ $scriptDir   = Split-Path $PSCommandPath -Parent
 $projectRoot = Split-Path $scriptDir -Parent
 
 $cfg = @{
-    Version         = '0.6.9'
+    Version         = '0.7.0'
     AdkPath         = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
     WinPEAddonPath  = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment'
     Architecture    = 'amd64'
@@ -1248,7 +1248,12 @@ while ($true) {
     }
     Write-StatusBar $statusBar
 
-    if ($cfgFile) { Write-Info "Config : $cfgFile  |  v$($cfg.Version)  |  $($cfg.Architecture)" }
+    if ($cfgFile) {
+        # Version dynamique : Get-PSWDVersion (lit le fichier VERSION) si dispo,
+        # sinon la valeur de la config chargee.
+        $pswdVer = if (Get-Command Get-PSWDVersion -EA SilentlyContinue) { Get-PSWDVersion } else { $cfg.Version }
+        Write-Info "Config : $cfgFile  |  v$pswdVer  |  $($cfg.Architecture)"
+    }
     else { Write-Warn "PSWinDeploy.psd1 non trouve -- valeurs par defaut" }
     Write-Host ""
 

@@ -53,4 +53,7 @@ export const api = {
   deployCompleted: (limit = 25, offset = 0) => call("GET", `/api/deploy/completed?limit=${limit}&offset=${offset}`),
   deleteDeployment: (id) => call("DELETE", `/api/deploy/completed/${encodeURIComponent(id)}`),
   purgeDeployments: (months) => call("POST", "/api/deploy/purge", { months }),
+  deployWaiting: () => call("GET", "/api/deploy/waiting"),
+  pushSequence: (id, sequenceText, label) => call("POST", `/api/deploy/pending/${encodeURIComponent(id)}`, { sequenceText, label }),
+  cancelWaiting: (id) => call("DELETE", `/api/deploy/waiting/${encodeURIComponent(id)}`),
 }

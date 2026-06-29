@@ -28,7 +28,7 @@ import cookieParser from "cookie-parser"
 import crypto from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { initDb, upsertDeployments, computeStats, listCompleted, deleteDeployment, purgeOlderThan } from "./stats-db.js"
+import { initDb, upsertDeployments, computeStats, listCompleted, deleteDeployment, purgeOlderThan, debugDump, unhideDeployment } from "./stats-db.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -45,6 +45,16 @@ const TTL_MS     = Number(process.env.SESSION_TTL_HOURS || 12) * 3600 * 1000
 const PORT       = Number(process.env.PORT || 3000)
 const STATIC_DIR = path.join(__dirname, "public")
 const SQLITE_PATH = process.env.SQLITE_PATH || "/data/pswd-stats.db"
+
+// Liens de pied de page (sidebar), configurables au build (ARG -> ENV) OU au
+// runtime (compose/-e). Chaque lien a une URL et un label personnalisable ;
+// on n'affiche que ceux dont l'URL est renseignee.
+const FOOTER_LINKS = [
+  { key: "github", label: process.env.LINK_GITHUB_LABEL || "GitHub",        url: process.env.LINK_GITHUB || "" },
+  { key: "kofi",   label: process.env.LINK_KOFI_LABEL   || "Ko-fi",         url: process.env.LINK_KOFI || "" },
+  { key: "docs",   label: process.env.LINK_DOCS_LABEL   || "Documentation", url: process.env.LINK_DOCS || "" },
+  { key: "site",   label: process.env.LINK_SITE_LABEL   || "Site web",      url: process.env.LINK_SITE || "" },
+].filter((l) => l.url)
 
 // Si l'API est en HTTPS avec un certificat auto-signe (objectif : chiffrer le
 // trafic, pas valider une PKI), on autorise le BFF a l'appeler sans rejeter le
@@ -75,8 +85,11 @@ setInterval(purge, 3600 * 1000)
 
 // ─── SQLite (stats de deploiement, persistantes) ───────────
 const PURGE_MONTHS = Number(process.env.PURGE_MONTHS || 0)   // 0 = pas de purge auto
+let dbReady = false
+let dbError = ""
 try {
   initDb(SQLITE_PATH)
+  dbReady = true
   console.log(`[bff] base stats : ${SQLITE_PATH}`)
   // Purge auto au demarrage puis une fois par jour (si configuree).
   if (PURGE_MONTHS > 0) {
@@ -91,7 +104,13 @@ try {
     console.log(`[bff] purge auto active : > ${PURGE_MONTHS} mois`)
   }
 } catch (e) {
-  console.error(`[bff] init SQLite KO (${SQLITE_PATH}) : ${e?.message || e}`)
+  dbError = e?.message || String(e)
+  // Erreur VISIBLE : si la base ne s'initialise pas (souvent un probleme de
+  // chargement du module natif better-sqlite3), les stats resteront vides.
+  // On le signale clairement dans les logs pour faciliter le diagnostic.
+  console.error(`[bff] ERREUR init SQLite (${SQLITE_PATH}) : ${dbError}`)
+  console.error(`[bff] -> les statistiques ne fonctionneront pas. Verifie que`)
+  console.error(`[bff]    better-sqlite3 se charge (libstdc++ presente dans l'image).`)
 }
 
 // Appel interne a l'API PowerShell (avec token), utilise par la sync.
@@ -106,6 +125,25 @@ async function apiGet(pathname) {
     clearTimeout(timer)
     const data = await r.json()
     return data
+  } finally { clearTimeout(timer) }
+}
+
+// Appel interne POST/DELETE (ecritures : token requis cote API). Retourne
+// { status, data } pour relayer le code HTTP au navigateur.
+async function apiSend(method, pathname, body) {
+  if (!API_URL) throw new Error("URL_API_PSWINDEPLOY non defini")
+  const headers = { "Content-Type": "application/json" }
+  if (API_TOKEN) headers["X-Deploy-Token"] = API_TOKEN
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 8000)
+  try {
+    const init = { method, headers, signal: ctrl.signal, ...(insecureAgent ? { dispatcher: insecureAgent } : {}) }
+    if (body !== undefined) init.body = JSON.stringify(body)
+    const r = await fetch(`${API_URL}${pathname}`, init)
+    clearTimeout(timer)
+    let data = {}
+    try { data = await r.json() } catch { data = { success: r.ok } }
+    return { status: r.status, data }
   } finally { clearTimeout(timer) }
 }
 
@@ -273,13 +311,18 @@ app.post("/auth/logout", (req, res) => {
 app.get("/auth/me", (req, res) => {
   const s = currentSession(req)
   if (!s) return res.status(401).json({ success: false })
-  res.json({ success: true, user: s.username })
+  res.json({ success: true, user: s.username, links: FOOTER_LINKS })
 })
 
 // Diagnostic : teste la connexion du conteneur vers l'API PowerShell.
 // Accessible apres login. Renvoie un verdict clair (ok / cause de l'echec).
 app.get("/diag", requireAuth, async (req, res) => {
-  const out = { apiUrl: API_URL || "(non defini)", tokenConfigured: !!API_TOKEN }
+  const out = {
+    apiUrl: API_URL || "(non defini)",
+    tokenConfigured: !!API_TOKEN,
+    dbReady,
+    dbError: dbError || undefined,
+  }
   if (!API_URL) return res.json({ ...out, ok: false, error: "URL_API_PSWINDEPLOY non defini." })
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 8000)
@@ -287,11 +330,57 @@ app.get("/diag", requireAuth, async (req, res) => {
     const r = await fetch(`${API_URL}/api/health`, { signal: ctrl.signal, ...(insecureAgent ? { dispatcher: insecureAgent } : {}) })
     clearTimeout(timer)
     const text = await r.text()
-    res.json({ ...out, ok: r.ok, status: r.status, sample: text.slice(0, 200) })
+    out.health = { ok: r.ok, status: r.status, sample: text.slice(0, 200) }
   } catch (e) {
     clearTimeout(timer)
     const cause = e?.cause?.code || e?.code || (e?.name === "AbortError" ? "TIMEOUT" : e?.message)
-    res.json({ ...out, ok: false, error: `${cause}` })
+    out.health = { ok: false, error: `${cause}` }
+  }
+
+  // Diagnostic des STATS : que renvoie l'API completed, et que contient la base ?
+  try {
+    const apiCompleted = await apiGet("/api/deploy/completed")
+    out.apiCompleted = {
+      ok: !!(apiCompleted && apiCompleted.success),
+      count: Array.isArray(apiCompleted?.data) ? apiCompleted.data.length : 0,
+    }
+    // Forcer une sync et regarder le resultat + l'etat de la base apres.
+    const sync = await syncDeployments()
+    out.sync = sync
+    try {
+      const stats = computeStats()
+      out.statsTotal = stats ? stats.Total : null
+    } catch (e) { out.statsError = e?.message || String(e) }
+    try {
+      const { total } = listCompleted({ limit: 1, offset: 0 })
+      out.dbRows = total
+    } catch (e) { out.dbError = e?.message || String(e) }
+    // Etat BRUT de la base (revele les lignes masquees qui n'apparaissent pas
+    // dans les stats : cause frequente d'un deploiement "done" absent des stats).
+    try { out.dbDump = debugDump() } catch (e) { out.dbDumpError = e?.message || String(e) }
+  } catch (e) {
+    out.statsDiagError = e?.message || String(e)
+  }
+
+  res.json({ ...out, ok: out.health?.ok !== false })
+})
+
+// Re-affiche les deploiements masques (hidden=1) : utile si on a supprime en
+// test et que les stats restent vides. Sans :id -> reaffiche TOUS les masques.
+app.post("/api/deploy/unhide", requireAuth, (req, res) => {
+  try {
+    const n = unhideDeployment(req.body?.id)
+    res.json({ success: true, unhidden: n })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || String(e) })
+  }
+})
+app.post("/api/deploy/unhide/:id", requireAuth, (req, res) => {
+  try {
+    const n = unhideDeployment(req.params.id)
+    res.json({ success: true, unhidden: n })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e?.message || String(e) })
   }
 })
 
@@ -345,6 +434,35 @@ app.post("/api/deploy/purge", requireAuth, (req, res) => {
   }
 })
 
+// ─── Mode "en attente" (pull interactif) ──────────────────
+// La GUI liste les postes en attente, pousse une sequence, ou annule.
+app.get("/api/deploy/waiting", requireAuth, async (req, res) => {
+  try {
+    const r = await apiGet("/api/deploy/waiting")
+    res.json(r)
+  } catch (e) {
+    res.status(502).json({ success: false, error: e?.message || "API injoignable." })
+  }
+})
+
+app.post("/api/deploy/pending/:id", requireAuth, async (req, res) => {
+  try {
+    const r = await apiSend("POST", `/api/deploy/pending/${encodeURIComponent(req.params.id)}`, req.body)
+    res.status(r.status).json(r.data)
+  } catch (e) {
+    res.status(502).json({ success: false, error: e?.message || "API injoignable." })
+  }
+})
+
+app.delete("/api/deploy/waiting/:id", requireAuth, async (req, res) => {
+  try {
+    const r = await apiSend("DELETE", `/api/deploy/waiting/${encodeURIComponent(req.params.id)}`)
+    res.status(r.status).json(r.data)
+  } catch (e) {
+    res.status(502).json({ success: false, error: e?.message || "API injoignable." })
+  }
+})
+
 app.use("/api", requireAuth, async (req, res) => {
   if (!API_URL) {
     return res.status(503).json({ success: false, error: "URL_API_PSWINDEPLOY non configuree dans le conteneur." })
@@ -368,8 +486,19 @@ app.use("/api", requireAuth, async (req, res) => {
     const r = await fetch(target, init)
     clearTimeout(timer)
     const text = await r.text()
+    const ctype = r.headers.get("content-type") || ""
+    // L'API doit repondre en JSON. Si elle renvoie du HTML (page d'erreur Pode,
+    // route inconnue...), on ne le relaie pas tel quel (le front planterait en
+    // tentant de le parser) : on renvoie une erreur JSON exploitable.
+    if (ctype.includes("text/html") || /^\s*</.test(text)) {
+      console.error(`[bff] reponse non-JSON de l'API (${r.status}) sur ${target}`)
+      return res.status(502).json({
+        success: false,
+        error: `L'API a renvoye une reponse inattendue (HTTP ${r.status}) sur ${req.originalUrl}. Verifie que la route existe et que l'API a bien demarre.`,
+      })
+    }
     res.status(r.status)
-    res.set("Content-Type", r.headers.get("content-type") || "application/json")
+    res.set("Content-Type", ctype || "application/json")
     res.send(text)
   } catch (e) {
     clearTimeout(timer)
