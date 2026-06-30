@@ -79,7 +79,7 @@ function Invoke-SimpleDeploy {
     $script:SimpleLogFile = Find-SimpleLogShare
     if ($script:SimpleLogFile) { Write-SimpleLog "Log : $script:SimpleLogFile" 'INFO' }
 
-    Write-SimpleLog "===== DEPLOIEMENT SIMPLE (lineaire) =====" 'STEP'
+    Write-SimpleLog "===== SIMPLE DEPLOYMENT (linear) =====" 'STEP'
     Write-SimpleLog "WIM=$WimPath Index=$Index Disque=$DiskNumber" 'INFO'
 
     # -- Import des modules necessaires --
@@ -180,7 +180,7 @@ function Invoke-SimpleDeploy {
         $xmlPath = Write-UnattendFile -TargetDrive 'W:' -Parameters $UnattendParams
         Write-SimpleLog "Unattend ecrit : $xmlPath" 'OK'
     } else {
-        Write-SimpleLog "Pas de parametres unattend -- etape sautee" 'WARN'
+        Write-SimpleLog "No unattend parameters -- step skipped" 'WARN'
     }
 
     # -- 5. Copie Deploy (optionnel, pour phase 2) --
@@ -230,14 +230,14 @@ function Invoke-SimpleDeploy {
             }
             Write-SimpleLog "Deploy copie" 'OK'
         } else {
-            Write-SimpleLog "X:\Deploy introuvable -- copie sautee" 'WARN'
+            Write-SimpleLog "X:\Deploy not found -- copy skipped" 'WARN'
         }
     } else {
         Write-SimpleLog "[5/6] Copie Deploy non demandee" 'INFO'
     }
 
     # -- 6. Flush + reboot --
-    Write-SimpleLog "[6/6] Flush des ecritures disque..." 'STEP'
+    Write-SimpleLog "[6/6] Flushing disk writes..." 'STEP'
     foreach ($vol in @('S','W','R')) {
         if (Test-Path "${vol}:\" -EA SilentlyContinue) {
             try { [System.IO.File]::WriteAllText("${vol}:\.flush", '1'); Remove-Item "${vol}:\.flush" -Force -EA SilentlyContinue } catch {}
@@ -272,7 +272,7 @@ function Invoke-SimpleDeploy {
         Write-Host "     Pour demarrer Windows, tape :  " -ForegroundColor White -NoNewline
         Write-Host "wpeutil reboot" -ForegroundColor Cyan
         Write-Host ""
-        Write-SimpleLog "Termine (mode no-reboot). En attente de 'wpeutil reboot' manuel." 'OK'
+        Write-SimpleLog "Done (no-reboot mode). Waiting for manual 'wpeutil reboot'." 'OK'
         return
     }
 

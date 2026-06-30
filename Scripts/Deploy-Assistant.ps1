@@ -70,7 +70,7 @@ function Read-Choice {
         Write-Host "  [?]  $Question [$Min-$Max] : " -ForegroundColor White -NoNewline
         $a = Read-Host
         if ($a -match '^\d+$' -and [int]$a -ge $Min -and [int]$a -le $Max) { return [int]$a }
-        Write-Warn "Choix invalide."
+        Write-Warn "Invalid choice."
     }
 }
 
@@ -181,17 +181,17 @@ $StepTypes = @(
 function New-Step {
     param([int]$Index)
     Write-Host ""
-    Write-Info "Type d'etape :"
+    Write-Info "Step type:"
     for ($i = 0; $i -lt $StepTypes.Count; $i++) {
         Write-Host ("    [{0,2}] {1,-16} {2}" -f ($i+1), $StepTypes[$i].Type, $StepTypes[$i].Label) -ForegroundColor Gray
     }
-    Write-Host "    [ 0] Annuler / terminer" -ForegroundColor DarkGray
-    $sel = Read-Choice "Choisir le type" -Max $StepTypes.Count -Min 0
+    Write-Host "    [ 0] Cancel / finish" -ForegroundColor DarkGray
+    $sel = Read-Choice "Choose the type" -Max $StepTypes.Count -Min 0
     if ($sel -eq 0) { return $null }
     $t = $StepTypes[$sel-1].Type
 
     $id   = 'pi-{0:D2}' -f $Index
-    $name = Read-Answer "Nom de l'etape" -Default $StepTypes[$sel-1].Label
+    $name = Read-Answer "Step name" -Default $StepTypes[$sel-1].Label
     $step = [ordered]@{
         Id          = $id
         Type        = $t
@@ -224,7 +224,7 @@ function New-Step {
                     Write-Host ("    [{0,2}] {1}" -f ($i+1), $nm) -ForegroundColor Gray
                 }
                 Write-Info "Saisir les numeros separes par des virgules (ex : 1,3,5)."
-                $picks = (Read-Answer "Applications a installer") -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' }
+                $picks = (Read-Answer "Applications to install") -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' }
                 $sel = foreach ($p in $picks) {
                     $idx = [int]$p - 1
                     if ($idx -ge 0 -and $idx -lt $apps.Count) {
@@ -247,16 +247,16 @@ function New-Step {
                     Write-Host ("    [{0,2}] {1}" -f ($i+1), $scripts[$i].Name) -ForegroundColor Gray
                 }
                 Write-Host "    [ 0] Saisir un chemin manuellement" -ForegroundColor DarkGray
-                $pick = Read-Choice "Choisir le script" -Max $scripts.Count -Min 0
-                if ($pick -eq 0) { $params.Path = Read-Answer "Chemin du script" }
+                $pick = Read-Choice "Choose the script" -Max $scripts.Count -Min 0
+                if ($pick -eq 0) { $params.Path = Read-Answer "Script path" }
                 else { $params.Path = $scripts[$pick-1].FullName }
             } else {
-                $params.Path = Read-Answer "Chemin du script (.ps1)"
+                $params.Path = Read-Answer "Script path (.ps1)"
             }
             $params.Shell = 'PowerShell'
         }
         'SetComputerName' {
-            $params.Name = Read-Answer "Nouveau nom (ou modele, ex WS-%SERIAL%)"
+            $params.Name = Read-Answer "New name (or template, e.g. WS-%SERIAL%)"
             $step.RebootAfter = 'IfRequired'
         }
         'SetLocale' {
@@ -269,7 +269,7 @@ function New-Step {
         }
         'SetRegistry' {
             $params.Path  = Read-Answer "Cle (ex HKLM:\Software\...)"
-            $params.Name  = Read-Answer "Nom de la valeur"
+            $params.Name  = Read-Answer "Value name"
             $params.Value = Read-Answer "Donnee"
         }
         'Reboot' {
@@ -289,9 +289,9 @@ function New-Step {
 function Edit-Steps {
     param([System.Collections.ArrayList]$Steps)
     while ($true) {
-        Write-Header "Etapes de la sequence"
+        Write-Header "Sequence steps"
         if ($Steps.Count -eq 0) {
-            Write-Info "Aucune etape pour le moment."
+            Write-Info "No step yet."
         } else {
             for ($i = 0; $i -lt $Steps.Count; $i++) {
                 $s = $Steps[$i]
@@ -300,12 +300,12 @@ function Edit-Steps {
             }
         }
         Write-Host ""
-        Write-Host "    [A] Ajouter une etape" -ForegroundColor Gray
-        Write-Host "    [S] Supprimer une etape" -ForegroundColor Gray
-        Write-Host "    [M] Monter / descendre une etape" -ForegroundColor Gray
-        Write-Host "    [T] Activer / desactiver une etape" -ForegroundColor Gray
-        Write-Host "    [V] Valider et enregistrer" -ForegroundColor Green
-        Write-Host "    [Q] Quitter sans enregistrer" -ForegroundColor DarkGray
+        Write-Host "    [A] Add a step" -ForegroundColor Gray
+        Write-Host "    [S] Delete a step" -ForegroundColor Gray
+        Write-Host "    [M] Move a step up / down" -ForegroundColor Gray
+        Write-Host "    [T] Enable / disable a step" -ForegroundColor Gray
+        Write-Host "    [V] Validate and save" -ForegroundColor Green
+        Write-Host "    [Q] Quit without saving" -ForegroundColor DarkGray
         Write-Host "  [?]  Choix : " -ForegroundColor White -NoNewline
         $c = (Read-Host).Trim().ToUpper()
         switch ($c) {
@@ -315,14 +315,14 @@ function Edit-Steps {
             }
             'S' {
                 if ($Steps.Count -gt 0) {
-                    $n = Read-Choice "Numero a supprimer" -Max $Steps.Count
+                    $n = Read-Choice "Number to delete" -Max $Steps.Count
                     $Steps.RemoveAt($n-1)
                 }
             }
             'M' {
                 if ($Steps.Count -gt 1) {
                     $n = Read-Choice "Numero a deplacer" -Max $Steps.Count
-                    $dir = Read-Answer "Monter (h) ou descendre (b) ?" -Default 'h'
+                    $dir = Read-Answer "Move up (h) or down (b)?" -Default 'h'
                     $idx = $n - 1
                     $tgt = if ($dir -eq 'b') { $idx + 1 } else { $idx - 1 }
                     if ($tgt -ge 0 -and $tgt -lt $Steps.Count) {
@@ -346,28 +346,28 @@ function Edit-Steps {
 # MENU PRINCIPAL
 # ---------------------------------------------------------------------------
 Clear-Host
-Write-Header "PSWinDeploy -- Editeur de sequences (phase 2)"
-Write-Info "Edite les sequences de POST-INSTALLATION (apres Windows installe)."
-Write-Info "Le disque, le WIM et les drivers sont geres en phase 1 (WinPE)."
+Write-Header "PSWinDeploy -- Sequence editor (phase 2)"
+Write-Info "Edits POST-INSTALLATION sequences (after Windows is installed)."
+Write-Info "Disk, WIM and drivers are handled in phase 1 (WinPE)."
 Write-Host ""
 Write-Info "Partage sequences : $SequencesPath"
 Write-Host ""
 
 if (-not $SequencesPath) {
-    Write-Err "Chemin du partage Sequences introuvable. Verifier PSWinDeploy.psd1."
+    Write-Err "Sequences share path not found. Check PSWinDeploy.psd1."
     exit 1
 }
 if (-not (Test-Path $SequencesPath -EA SilentlyContinue)) {
     Write-Warn "Le partage Sequences n'existe pas encore : $SequencesPath"
-    if (Read-YesNo "Le creer ?" $true) { New-Item -ItemType Directory $SequencesPath -Force | Out-Null }
+    if (Read-YesNo "Create it?" $true) { New-Item -ItemType Directory $SequencesPath -Force | Out-Null }
     else { exit 1 }
 }
 
 while ($true) {
     Write-Header "Mode"
-    Write-Host "    [1] Creer une nouvelle sequence" -ForegroundColor White
-    Write-Host "    [2] Editer une sequence existante" -ForegroundColor White
-    Write-Host "    [3] Lister les sequences" -ForegroundColor White
+    Write-Host "    [1] Create a new sequence" -ForegroundColor White
+    Write-Host "    [2] Edit an existing sequence" -ForegroundColor White
+    Write-Host "    [3] List sequences" -ForegroundColor White
     Write-Host "    [Q] Quitter" -ForegroundColor DarkGray
     Write-Host "  [?]  Choix : " -ForegroundColor White -NoNewline
     $mode = (Read-Host).Trim().ToUpper()
@@ -375,9 +375,9 @@ while ($true) {
     if ($mode -eq 'Q') { break }
 
     if ($mode -eq '3') {
-        Write-Header "Sequences disponibles"
+        Write-Header "Available sequences"
         $files = @(Get-ChildItem $SequencesPath -Filter '*.psd1' -EA SilentlyContinue)
-        if ($files.Count -eq 0) { Write-Info "Aucune sequence." }
+        if ($files.Count -eq 0) { Write-Info "No sequence." }
         foreach ($f in $files) {
             try {
                 $s = Import-PowerShellDataFile $f.FullName
@@ -396,9 +396,9 @@ while ($true) {
     $outPath = $null
 
     if ($mode -eq '1') {
-        Write-Header "Nouvelle sequence"
-        $name = Read-Answer "Nom de la sequence" -Default 'Post-installation standard'
-        $fileName = Read-Answer "Nom de fichier (.psd1)" -Default 'ma-sequence.psd1'
+        Write-Header "New sequence"
+        $name = Read-Answer "Sequence name" -Default 'Post-installation standard'
+        $fileName = Read-Answer "File name (.psd1)" -Default 'ma-sequence.psd1'
         if ($fileName -notlike '*.psd1') { $fileName += '.psd1' }
         $outPath = Join-Path $SequencesPath $fileName
         $seq = [ordered]@{
@@ -412,12 +412,12 @@ while ($true) {
     }
     elseif ($mode -eq '2') {
         $files = @(Get-ChildItem $SequencesPath -Filter '*.psd1' -EA SilentlyContinue)
-        if ($files.Count -eq 0) { Write-Warn "Aucune sequence a editer."; continue }
-        Write-Header "Choisir la sequence"
+        if ($files.Count -eq 0) { Write-Warn "No sequence to edit."; continue }
+        Write-Header "Choose the sequence"
         for ($i = 0; $i -lt $files.Count; $i++) {
             Write-Host ("    [{0}] {1}" -f ($i+1), $files[$i].Name) -ForegroundColor White
         }
-        $pick = Read-Choice "Sequence a editer" -Max $files.Count
+        $pick = Read-Choice "Sequence to edit" -Max $files.Count
         $outPath = $files[$pick-1].FullName
         try {
             $loaded = Import-PowerShellDataFile $outPath
@@ -450,7 +450,7 @@ while ($true) {
     }
 
     $save = Edit-Steps -Steps $steps
-    if (-not $save) { Write-Warn "Abandonne (non enregistre)."; continue }
+    if (-not $save) { Write-Warn "Aborted (not saved)."; continue }
 
     # Re-numeroter les Id pour rester coherent.
     for ($i = 0; $i -lt $steps.Count; $i++) {

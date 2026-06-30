@@ -6,7 +6,7 @@
 #   - pour chaque step : ecrire un marqueur, APPELER le handler par son Type,
 #     lire le CONTRAT retourne (New-TaskResult), decider reboot / step suivant
 #   - gerer la REPRISE selon le modele simple :
-#       * autologon active UNE FOIS au debut, marqueur "deploiement en cours"
+#       * autologon active UNE FOIS au debut, marqueur "deployment in progress"
 #       * UNE tache "a l'ouverture de session" relance l'assistant en P2
 #       * desarmement (autologon + tache) UNIQUEMENT a la fin (done)
 #
@@ -41,7 +41,7 @@ function Write-EngineLog {
 }
 
 # ===========================================================================
-#  REPRISE -- modele simple : autologon = "deploiement en cours",
+#  REPRISE -- modele simple : autologon = "deployment in progress",
 #  une tache "a l'ouverture de session" relance l'assistant.
 # ===========================================================================
 function Get-LocalAdminName {
@@ -56,7 +56,7 @@ function Get-LocalAdminName {
 
 function Enable-DeploymentMode {
     <#
-    .SYNOPSIS Active le "mode deploiement" : autologon ON + tache de reprise a
+    .SYNOPSIS Active le "deployment mode" : autologon ON + tache de reprise a
         l'ouverture de session. Appele UNE FOIS au debut de la phase 2. Idempotent.
     .PARAMETER AdminPassword  mot de passe du compte admin local (pour l'autologon)
     .PARAMETER ResumeScript   chemin de Start-Deploy.ps1 a relancer
@@ -67,7 +67,7 @@ function Enable-DeploymentMode {
     )
     $adminName = Get-LocalAdminName
 
-    # 1) AUTOLOGON (marqueur "deploiement en cours")
+    # 1) AUTOLOGON (marqueur "deployment in progress")
     if ($AdminPassword) {
         try {
             $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
@@ -82,7 +82,7 @@ function Enable-DeploymentMode {
             Write-EngineLog "Activation autologon echouee : $_" 'WARN'
         }
     } else {
-        Write-EngineLog "Pas de mot de passe admin -- autologon non active (reprise par tache au demarrage)." 'WARN'
+        Write-EngineLog "No admin password -- autologon not enabled (resume via startup task)." 'WARN'
     }
 
     # 2) TACHE DE REPRISE "A L'OUVERTURE DE SESSION"
@@ -109,7 +109,7 @@ function Enable-DeploymentMode {
         }
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
         Register-ScheduledTask -TaskName 'PSWinDeployResume' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -EA Stop | Out-Null
-        Write-EngineLog "Tache de reprise creee (a l'ouverture de session)." 'SUCCESS'
+        Write-EngineLog "Resume task created (at logon)." 'SUCCESS'
     } catch {
         Write-EngineLog "Creation tache de reprise echouee : $_" 'WARN'
     }
@@ -120,7 +120,7 @@ function Enable-DeploymentMode {
 
 function Disable-DeploymentMode {
     <#
-    .SYNOPSIS Desactive le "mode deploiement" : autologon OFF + tache supprimee +
+    .SYNOPSIS Desactive le "deployment mode" : autologon OFF + tache supprimee +
         mot de passe retire du registre. Appele UNE FOIS a la fin (deploiement
         termine). C'est le SEUL endroit qui desarme.
     #>
@@ -132,11 +132,11 @@ function Disable-DeploymentMode {
     try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
     # Filet : certaines configs n'aiment pas Unregister-ScheduledTask -> schtasks.
     try { schtasks /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
-    Write-EngineLog "Mode deploiement desactive (autologon OFF, tache supprimee)." 'INFO'
+    Write-EngineLog "Deployment mode disabled (autologon OFF, task removed)." 'INFO'
 }
 
 function Test-DeploymentMode {
-    <# .SYNOPSIS Le mode deploiement est-il actif ? (autologon ON = en cours) #>
+    <# .SYNOPSIS Le deployment mode est-il actif ? (autologon ON = en cours) #>
     try {
         $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
         $v = (Get-ItemProperty $wl -Name 'AutoAdminLogon' -EA SilentlyContinue).AutoAdminLogon
@@ -149,12 +149,12 @@ function Write-DeployResetScript {
     $script = @'
 # Reset-PSWinDeploy.ps1 -- desarme l'autologon et la reprise PSWinDeploy.
 # A lancer en administrateur si le deploiement reboucle ou se bloque.
-Write-Host "Desarmement de l'autologon et de la reprise..." -ForegroundColor Yellow
+Write-Host "Disarming autologon and resume..." -ForegroundColor Yellow
 $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 try { Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue } catch {}
 try { Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue } catch {}
 try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
-Write-Host "Termine. Autologon et reprise desactives." -ForegroundColor Green
+Write-Host "Done. Autologon and resume disabled." -ForegroundColor Green
 Read-Host "Entree pour fermer"
 '@
     foreach ($dest in @('C:\Deploy\Reset-PSWinDeploy.ps1', "$env:PUBLIC\Desktop\Reset-PSWinDeploy.ps1")) {
@@ -301,7 +301,7 @@ function Invoke-Engine {
         Write-EngineLog "Reprise : depart au step '$startId' (reboot #$rebootCount)" 'INFO'
     }
     if ($startId -eq '__done__') {
-        Write-EngineLog "Etat = termine. Rien a faire." 'SUCCESS'
+        Write-EngineLog "State = done. Nothing to do." 'SUCCESS'
         return @{ done = $true }
     }
 
@@ -367,10 +367,10 @@ function Invoke-Engine {
             $rebootCount++
             Save-EngineState -State @{ nextStepId = $nextId; rebootCount = $rebootCount }
             Write-EngineLog "Reboot #$rebootCount -- reprise prevue au step '$nextId'" 'WARN'
-            # L'autologon + la tache de reprise sont DEJA armes (mode deploiement
+            # L'autologon + la tache de reprise sont DEJA armes (deployment mode
             # active au demarrage). On reboote simplement.
             Send-DeployReport -Status 'rebooting' -Step $nextId -Message "Reboot avant $nextId"
-            Write-EngineLog "=== REDEMARRAGE dans 5 secondes ===" 'WARN'
+            Write-EngineLog "=== REBOOT in 5 seconds ===" 'WARN'
             Start-Sleep -Seconds 5
             Restart-Computer -Force
             return @{ rebooting = $true }
@@ -382,7 +382,7 @@ function Invoke-Engine {
     foreach ($mk in @('.current-step', '.updates-passes')) {
         try { Remove-Item (Join-Path $Context.LogsDir $mk) -Force -EA SilentlyContinue } catch {}
     }
-    Send-DeployReport -Status 'done' -Percent 100 -Message "Deploiement termine : $($sequence.Name)"
+    Send-DeployReport -Status 'done' -Percent 100 -Message "Deployment complete: $($sequence.Name)"
     Write-EngineLog "==============================================" 'SUCCESS'
     Write-EngineLog "  DEPLOIEMENT TERMINE : '$($sequence.Name)'" 'SUCCESS'
     Write-EngineLog "==============================================" 'SUCCESS'

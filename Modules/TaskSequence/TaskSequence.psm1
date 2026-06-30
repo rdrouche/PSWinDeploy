@@ -36,7 +36,7 @@ function Export-DeployLogs {
     #>
     param([string]$NetworkShare = '', [string]$Tag = '')
     try {
-        # Determiner le partage Logs (autonome : cherche un partage \\serveur\Logs)
+        # Dedoner le partage Logs (autonome : cherche un partage \\serveur\Logs)
         $logShare = ''
         if ($NetworkShare) {
             $cand = Join-Path (Split-Path $NetworkShare -Parent) 'Logs'
@@ -56,7 +56,7 @@ function Export-DeployLogs {
             }
         }
         if (-not $logShare) {
-            Write-TSLog "Export logs : aucun partage Logs trouve" -Level WARN
+            Write-TSLog "Log export: no Logs share found" -Level WARN
             return
         }
 
@@ -470,10 +470,10 @@ function Get-DeployState {
 
 function Remove-DeployState {
     <#
-    .SYNOPSIS Supprime le fichier d'etat (deploiement termine ou abandonne).#>
+    .SYNOPSIS Supprime le fichier d'etat (deploiement done ou abandonne).#>
     if (Test-Path $script:StateFile) {
         Remove-Item $script:StateFile -Force
-        Write-TSLog "Fichier etat supprime (deploiement termine)" -Level DEBUG
+        Write-TSLog "State file removed (deployment complete)" -Level DEBUG
     }
 }
 
@@ -526,7 +526,7 @@ function Get-LocalAdminName {
     .SYNOPSIS Retourne le nom REEL du compte administrateur local (SID -500).
     .DESCRIPTION
         Le compte admin integre s'appelle 'Administrator' (EN), 'Administrateur'
-        (FR), 'Administrador' (ES)... Son SID se termine TOUJOURS par '-500'.
+        (FR), 'Administrador' (ES)... Son SID se done TOUJOURS par '-500'.
         On resout le nom via le SID pour etre independant de la langue de l'OS.
         Repli : 'Administrator' si la detection echoue.
     #>
@@ -592,7 +592,7 @@ $ro = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
 try { Remove-ItemProperty $ro -Name 'PSWinDeployResume' -Force -EA SilentlyContinue } catch {}
 try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
 try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
-Write-Host "Termine. L'autologon et la reprise sont desactives." -ForegroundColor Green
+Write-Host "Done. Autologon and resume are disabled." -ForegroundColor Green
 Write-Host "Pour relancer l'assistant : C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard" -ForegroundColor Cyan
 Read-Host "Appuyez sur Entree pour fermer"
 '@
@@ -610,7 +610,7 @@ Read-Host "Appuyez sur Entree pour fermer"
 function Disable-DeployResume {
     <#
     .SYNOPSIS Desarme la reprise : autologon OFF + RunOnce + tache planifiee
-        supprimes. A appeler quand la boucle de reprise est terminee (0 MAJ,
+        supprimes. A appeler quand la boucle de reprise est donee (0 MAJ,
         fin de sequence...) pour ne pas reboucler ni laisser le mdp en clair.
     #>
     if (Test-IsWinPE) { return }
@@ -673,7 +673,7 @@ function Set-DeployResumeTask {
         Mecanisme de reprise FIABLE en phase 2 (Windows demarre) : contrairement
         a l'autologon (LogonCount=1, consomme au 1er boot) ou au RunOnce (necessite
         une session), une tache planifiee 'au demarrage' s'execute a CHAQUE boot
-        sans dependre d'un logon. On la supprime quand la sequence est terminee.
+        sans dependre d'un logon. On la supprime quand la sequence est donee.
 
         La tache tourne en SYSTEM. Pour l'assistant interactif (qui a besoin d'une
         fenetre), on re-arme aussi l'autologon. Mais pour les etapes auto (MAJ,
@@ -693,7 +693,7 @@ function Set-DeployResumeTask {
                    Where-Object { Test-Path $_ -EA SilentlyContinue } | Select-Object -First 1
             if ($alt) { $ResumeScript = $alt }
             else {
-                Write-TSLog "Set-DeployResumeTask : Start-Deploy.ps1 introuvable -- tache non creee (l'autologon prend le relais)." -Level WARN
+                Write-TSLog "Set-DeployResumeTask: Start-Deploy.ps1 not found -- task not created (autologon takes over)." -Level WARN
                 return $false
             }
         }
@@ -724,7 +724,7 @@ function Set-DeployResumeTask {
 }
 
 function Remove-DeployResumeTask {
-    <# .SYNOPSIS Supprime la tache de reprise (sequence terminee). #>
+    <# .SYNOPSIS Supprime la tache de reprise (sequence donee). #>
     try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
 }
 
@@ -787,7 +787,7 @@ function Set-DeployRunOnce {
                 }
             }
         } else {
-            Write-TSLog "Ruche SOFTWARE offline introuvable -- RunOnce non configure" -Level WARN
+            Write-TSLog "Offline SOFTWARE hive not found -- RunOnce not configured" -Level WARN
         }
     } else {
         # Windows demarre : RunOnce du systeme courant
@@ -823,12 +823,12 @@ function Invoke-DeployReboot {
     # UNIQUEMENT en phase 1 (WinPE) : en phase 2, on est deja sur C:, W: n'existe
     # pas, et le state est deja sauve au bon endroit par Save-DeployState.
     if ($NoCopyDeploy) {
-        Write-TSLog "Copy-DeployToTarget SAUTE (diagnostic)" -Level WARN
+        Write-TSLog "Copy-DeployToTarget SKIPPED (diagnostic)" -Level WARN
     } elseif (Test-IsWinPE) {
         Copy-DeployToTarget -TargetDrive 'W:'
     }
     if ($NoRunOnce) {
-        Write-TSLog "Set-DeployRunOnce SAUTE (diagnostic)" -Level WARN
+        Write-TSLog "Set-DeployRunOnce SKIPPED (diagnostic)" -Level WARN
     } elseif (Test-IsWinPE) {
         # WinPE : reprise via RunOnce/unattend (1er boot)
         Set-DeployRunOnce
@@ -857,7 +857,7 @@ function Invoke-DeployReboot {
         if (-not $autoOk -and -not $taskOk) { Set-DeployRunOnce }
     }
 
-    Write-TSLog "Sauvegarde etat OK -- redemarrage..." -Level WARN
+    Write-TSLog "State saved OK -- rebooting..." -Level WARN
     Start-Sleep -Seconds $DelaySeconds
 
     # IMPORTANT : en WinPE, utiliser 'wpeutil reboot' (methode standard WinPE)
@@ -869,7 +869,7 @@ function Invoke-DeployReboot {
     if (Test-IsWinPE) {
         # Forcer le flush des ecritures disque avant le reboot
         try {
-            Write-TSLog "Flush des ecritures disque avant reboot..." -Level INFO
+            Write-TSLog "Flushing disk writes before reboot..." -Level INFO
             # Synchroniser tous les volumes (equivalent d'un sync)
             foreach ($vol in @('S','W','R')) {
                 if (Test-Path "${vol}:\" -EA SilentlyContinue) {
@@ -1007,7 +1007,7 @@ function Invoke-StepApplyWIM {
 
     # Lecture s?curis?e des parametres (PSD1 = case insensitive)
     $wimPath = Get-StepParam $Step 'wimPath'
-    if ([string]::IsNullOrWhiteSpace($wimPath)) { throw "ApplyWIM : wimPath manquant" }
+    if ([string]::IsNullOrWhiteSpace($wimPath)) { throw "ApplyWIM: wimPath missing" }
     # Reecrire le chemin avec l'IP si basculement DNS->IP au montage des partages
     $wimPath = Resolve-DeployPath $wimPath
 
@@ -1096,7 +1096,7 @@ function Invoke-StepJoinDomain {
     if ([string]::IsNullOrWhiteSpace($ou) -and (Get-Command Get-PSWinDeployConfig -EA SilentlyContinue)) {
         try { $ou = Get-PSWinDeployConfig -Key 'DomainOU' } catch {}
     }
-    if ([string]::IsNullOrWhiteSpace($domain)) { throw "JoinDomain : 'domain' obligatoire (step ou config DomainName)" }
+    if ([string]::IsNullOrWhiteSpace($domain)) { throw "JoinDomain: 'domain' required (step or DomainName config)" }
 
     # IDEMPOTENCE : si la machine est DEJA jointe au domaine cible, ne rien faire.
     # Indispensable car le step est rejoue apres le reboot de jonction (sinon il
@@ -1138,14 +1138,14 @@ function Invoke-StepJoinDomain {
     # echec propre avec message clair (pas de blocage en SYSTEM).
     if (-not $username -or -not $password) {
         if ($interactive) {
-            Write-TSLog "Credentials de jonction absents du vault -- saisie interactive." -Level WARN -StepId $Step.id
+            Write-TSLog "Join credentials missing from the vault -- interactive prompt." -Level WARN -StepId $Step.id
             if (-not $username) { $username = Read-Host "  Compte de jonction $domain (ex: CORP\svc-join)" }
             if (-not $password) {
                 $sec = Read-Host "  Mot de passe pour $username" -AsSecureString
                 $password = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
             }
         } else {
-            Write-TSLog "ECHEC jonction : credentials absents du vault et pas de session interactive." -Level ERROR -StepId $Step.id
+            Write-TSLog "JOIN FAILED: credentials missing from the vault and no interactive session." -Level ERROR -StepId $Step.id
             Write-TSLog "Ajoutez 'domainJoinUser' et 'domainJoinPassword' dans secrets.vault.psd1." -Level ERROR -StepId $Step.id
             throw "JoinDomain : domainJoinUser / domainJoinPassword absents du vault"
         }
@@ -1196,7 +1196,7 @@ function Invoke-StepInstallUpdates {
 
     # En WinPE, Windows Update n'existe pas -- ce step est DEFERE en phase 2
     if (Test-IsWinPE) {
-        Write-TSLog "InstallUpdates defere : sera execute apres le premier demarrage de Windows" -Level INFO -StepId $Step.id
+        Write-TSLog "InstallUpdates deferred: will run after the first Windows boot" -Level INFO -StepId $Step.id
         return @{ Success = $true; RebootRequired = $false; Deferred = $true }
     }
 
@@ -1225,9 +1225,9 @@ function Invoke-StepInstallUpdates {
         $result   = $searcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
 
         if (@($result.Updates).Count -eq 0) {
-            # 0 MAJ = termine. Nettoyer le compteur, DESARMER la reprise, et
+            # 0 MAJ = done. Nettoyer le compteur, DESARMER la reprise, et
             # passer au step suivant SANS reboot. C'est la condition d'arret.
-            Write-TSLog "Aucune mise a jour disponible -- etape MAJ terminee." -Level SUCCESS -StepId $Step.id
+            Write-TSLog "No updates available -- update step complete." -Level SUCCESS -StepId $Step.id
             try { Remove-Item $passFile -Force -EA SilentlyContinue } catch {}
             return @{ Success = $true; RebootRequired = $false }
         }
@@ -1248,13 +1248,13 @@ function Invoke-StepInstallUpdates {
         $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
         foreach ($u in $result.Updates) { if ($u.IsDownloaded) { [void]$toInstall.Add($u) } }
         if (@($toInstall).Count -eq 0) {
-            Write-TSLog "Aucune mise a jour telechargee." -Level WARN -StepId $Step.id
+            Write-TSLog "No updates downloaded." -Level WARN -StepId $Step.id
             return @{ Success = $true; RebootRequired = $false }
         }
         $installer = $session.CreateUpdateInstaller()
         $installer.Updates = $toInstall
         $installResult = $installer.Install()
-        Write-TSLog "Installation terminee (code $($installResult.ResultCode), 2=succes)" -Level SUCCESS -StepId $Step.id
+        Write-TSLog "Installation donee (code $($installResult.ResultCode), 2=succes)" -Level SUCCESS -StepId $Step.id
         if ($installResult.RebootRequired) {
             # Incrementer le compteur de passes (persiste pour la reprise).
             try {
@@ -1264,7 +1264,7 @@ function Invoke-StepInstallUpdates {
             } catch {}
             Write-TSLog "Un redemarrage est requis -- le step MAJ reprendra apres le reboot pour une nouvelle passe." -Level WARN -StepId $Step.id
             $script:RebootRequired = $true
-            # IMPORTANT : ne PAS marquer le step comme termine -> il sera rejoue
+            # IMPORTANT : ne PAS marquer le step comme done -> il sera rejoue
             # apres reboot pour chercher d'autres MAJ. On signale 'StayOnStep'.
             return @{ Success = $true; RebootRequired = $true; StayOnStep = $true }
         }
@@ -1337,7 +1337,7 @@ function Invoke-StepInstallSoftware {
                         }
                     } catch { Write-TSLog "  winget erreur : $_ -- repli choco si dispo" -Level WARN -StepId $Step.id }
                 } else {
-                    Write-TSLog "  winget introuvable sur ce poste -- repli choco si dispo" -Level INFO -StepId $Step.id
+                    Write-TSLog "  winget not found on this machine -- choco fallback if available" -Level INFO -StepId $Step.id
                 }
             }
             # 2) choco (si ChocoId declare et si choco autorise) -- installer si absent
@@ -1509,7 +1509,7 @@ function Invoke-StepInstallSoftware {
     $packages = Get-StepParam $Step 'packages'
     $source   = Resolve-DeployPath (Get-StepParam $Step 'source' -Default '')
     if (-not $packages) {
-        Write-TSLog "InstallSoftware : aucun package specifie" -Level WARN -StepId $Step.id
+        Write-TSLog "InstallSoftware: no package specified" -Level WARN -StepId $Step.id
         return
     }
     foreach ($pkg in @($packages)) {
@@ -1560,7 +1560,7 @@ function Invoke-StepCleanup {
         de reprise.
     #>
     param([PSCustomObject]$Step)
-    Write-TSLog "Nettoyage de fin de deploiement (C:\Deploy)..." -Level STEP -StepId $Step.id
+    Write-TSLog "End-of-deployment cleanup (C:\Deploy)..." -Level STEP -StepId $Step.id
     $keepLogs = Get-StepParam $Step 'keepLogs' -Default $true
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return @{ Success = $true } }
@@ -1585,7 +1585,7 @@ function Invoke-StepCleanup {
     } else {
         Write-TSLog "  Logs conserves : C:\Deploy\Logs" -Level INFO -StepId $Step.id
     }
-    Write-TSLog "Nettoyage termine." -Level SUCCESS -StepId $Step.id
+    Write-TSLog "Cleanup complete." -Level SUCCESS -StepId $Step.id
     return @{ Success = $true; RebootRequired = $false }
 }
 
@@ -1602,8 +1602,8 @@ function Invoke-StepShowWizard {
     param([PSCustomObject]$Step)
     Write-TSLog "Ouverture de l'assistant post-installation (depuis la sequence)..." -Level STEP -StepId $Step.id
     $selfPath = 'C:\Deploy\Scripts\Start-Deploy.ps1'
-    if (-not (Test-Path $selfPath)) { Write-TSLog "Start-Deploy introuvable pour l'assistant" -Level WARN -StepId $Step.id; return @{ Success = $false } }
-    # SUIVI : signaler "en attente d'une action utilisateur" pendant que
+    if (-not (Test-Path $selfPath)) { Write-TSLog "Start-Deploy not found for the assistant" -Level WARN -StepId $Step.id; return @{ Success = $false } }
+    # SUIVI : signaler "waiting for user action" pendant que
     # l'assistant interactif est ouvert (le deploiement est en pause cote
     # operateur). Best effort, silencieux si l'API est injoignable.
     if (Get-Command Send-DeployReport -EA SilentlyContinue) {
@@ -1611,9 +1611,9 @@ function Invoke-StepShowWizard {
     }
     try {
         Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', "`"$selfPath`"", '-PostInstallWizard') -Wait
-        # L'operateur a termine : on repasse en cours d'execution.
+        # L'operateur a done : on repasse en cours d'execution.
         if (Get-Command Send-DeployReport -EA SilentlyContinue) {
-            Send-DeployReport -Status 'running' -Step $Step.id -Percent 100 -Message 'Action utilisateur terminee (assistant ferme)'
+            Send-DeployReport -Status 'running' -Step $Step.id -Percent 100 -Message 'Action utilisateur donee (assistant ferme)'
         }
         return @{ Success = $true }
     } catch {
@@ -1717,7 +1717,7 @@ function Install-Chocolatey {
         $choco = "$env:ProgramData\chocolatey\bin"
         if ((Test-Path $choco) -and ($env:Path -notlike "*$choco*")) { $env:Path += ";$choco" }
         if (Get-Command choco -ErrorAction SilentlyContinue) {
-            Write-TSLog "Chocolatey installe (PATH rafraichi dans la session, pas de reboot)." -Level SUCCESS
+            Write-TSLog "Chocolatey installed (PATH refreshed in session, no reboot)." -Level SUCCESS
             # PAS de reboot : choco fonctionne immediatement, le PATH est deja
             # rafraichi ci-dessus. Forcer un reboot ici cassait la sequence en cours.
             return $true
@@ -1750,7 +1750,7 @@ function Invoke-StepRunScript {
     $scrArgs  = Get-StepParam $Step 'args' -Default ''
     $shell    = Get-StepParam $Step 'shell' -Default 'PowerShell'
 
-    if ([string]::IsNullOrWhiteSpace($path)) { throw "RunScript : 'path' manquant" }
+    if ([string]::IsNullOrWhiteSpace($path)) { throw "RunScript: 'path' missing" }
     $path = Resolve-DeployPath $path
     if (-not (Test-Path $path -EA SilentlyContinue)) { throw "Script introuvable : $path" }
 
@@ -1795,7 +1795,7 @@ function shutdown { Write-Host '[PSWinDeploy] shutdown intercepte -> signal rebo
         Write-TSLog "Script demande un reboot (exit $($proc.ExitCode)) -> gere par le moteur" -Level INFO -StepId $Step.id
         $script:RebootRequired = $true
     } elseif ($proc.ExitCode -ne 0) {
-        $msg = "Script $path termine avec exit $($proc.ExitCode)"
+        $msg = "Script $path done avec exit $($proc.ExitCode)"
         if ($Step.continueOnError) { Write-TSLog $msg -Level WARN }
         else { throw $msg }
     }
@@ -1803,7 +1803,7 @@ function shutdown { Write-Host '[PSWinDeploy] shutdown intercepte -> signal rebo
     # FILET DE SECURITE : meme si le script n'a pas retourne 3010, si Windows a
     # un reboot en attente (install, Restart-Computer en CMD...), on le gere.
     if (-not $script:RebootRequired -and (Test-PendingReboot)) {
-        Write-TSLog "Reboot en attente detecte apres le script -> gere par le moteur" -Level INFO -StepId $Step.id
+        Write-TSLog "Pending reboot detected after the script -> handled by the engine" -Level INFO -StepId $Step.id
         $script:RebootRequired = $true
     }
 }
@@ -1843,7 +1843,7 @@ function Invoke-StepWaitForNetwork {
         } catch {}
         if (-not $netOk) {
             $ip = & ipconfig 2>&1 | Out-String
-            if ($ip -match 'IPv4') { $netOk = $true; Write-TSLog "Reseau actif (IPv4)" -Level SUCCESS }
+            if ($ip -match 'IPv4') { $netOk = $true; Write-TSLog "Network active (IPv4)" -Level SUCCESS }
         }
         if ($netOk) { return }
         Start-Sleep 5
@@ -2003,7 +2003,7 @@ function Invoke-DeployStep {
                             reg unload 'HKLM\OFFLINE_SYS' 2>&1 | Out-Null
                             Write-TSLog "Nom machine (offline) : $newName" -Level SUCCESS -StepId $Step.id
                         } else {
-                            Write-TSLog "Ruche SYSTEM introuvable, nom applique au prochain boot" -Level WARN -StepId $Step.id
+                            Write-TSLog "SYSTEM hive not found, name applied at next boot" -Level WARN -StepId $Step.id
                         }
                     }
                 } catch { Write-TSLog "SetComputerName : $_" -Level WARN -StepId $Step.id }
@@ -2022,7 +2022,7 @@ function Invoke-DeployStep {
         }
 
         $State.completedSteps += $Step.id
-        Write-TSLog "Step termine : $($Step.name)" -Level SUCCESS -StepId $Step.id
+        Write-TSLog "Step done : $($Step.name)" -Level SUCCESS -StepId $Step.id
         return @{ Success = $true; RebootRequired = $script:RebootRequired }
 
     } catch {
@@ -2118,7 +2118,7 @@ function Invoke-TaskSequence {
     Write-TSLog "|       PSWINDEX -- Task Sequence Engine         |" -Level STEP
     Write-TSLog "+==============================================+" -Level STEP
     Write-TSLog "Sequence : $SequencePath" -Level INFO
-    if ($DryRun) { Write-TSLog "MODE DRY-RUN -- aucune action reelle" -Level WARN }
+    if ($DryRun) { Write-TSLog "DRY-RUN MODE -- no real action" -Level WARN }
 
     # Initialiser les hooks (charge la GUI si un profil de surcharge existe)
     Initialize-PSWDHooks
@@ -2321,7 +2321,7 @@ function Invoke-TaskSequence {
         $stepRebootReq = (& $resGet 'RebootRequired')
         $stepStayOn    = [bool](& $resGet 'StayOnStep')
 
-        # Step termine sans reboot : retirer le marqueur "en cours". Si un reboot
+        # Step done sans reboot : retirer le marqueur "en cours". Si un reboot
         # suit, on LAISSE le marqueur (il indique qu'on a redemarre pendant ce step).
         $stepWillReboot = ($null -ne $stepRebootReq -and [bool]$stepRebootReq)
         if (-not $stepWillReboot) {
@@ -2363,7 +2363,7 @@ function Invoke-TaskSequence {
             } elseif ($nextStep) {
                 $state.nextStepId = $nextStep.id
             } else {
-                # Dernier step -- on flag "termine" puis reboot
+                # Dernier step -- on flag "done" puis reboot
                 $state.nextStepId = '__done__'
             }
 
@@ -2425,8 +2425,8 @@ function Invoke-TaskSequence {
             }
         }
         Write-TSLog "==============================================" -Level SUCCESS
-        Write-TSLog "Sequence terminee SANS reboot auto (mode diagnostic)." -Level WARN
-        Write-TSLog "Ecritures disque flushees. Tu peux maintenant taper :" -Level WARN
+        Write-TSLog "Sequence donee SANS reboot auto (mode diagnostic)." -Level WARN
+        Write-TSLog "Disk writes flushed. You can now type:" -Level WARN
         Write-TSLog "    wpeutil reboot" -Level WARN
         Write-TSLog "NOTE : la phase 2 n'a PAS ete preparee (pas de Copy/RunOnce)." -Level INFO
         Write-TSLog "==============================================" -Level SUCCESS
@@ -2443,11 +2443,11 @@ function Invoke-TaskSequence {
         try {
             $doneFile = 'C:\Deploy\Logs\DEPLOYMENT-COMPLETE.txt'
             $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-            Set-Content -Path $doneFile -Value "Deploiement termine le $stamp sur $env:COMPUTERNAME" -Encoding UTF8 -EA SilentlyContinue
+            Set-Content -Path $doneFile -Value "Deploiement done le $stamp sur $env:COMPUTERNAME" -Encoding UTF8 -EA SilentlyContinue
         } catch {}
         Write-TSLog "==============================================" -Level SUCCESS
         Write-TSLog "  DEPLOIEMENT TERMINE : '$($sequence.name)'" -Level SUCCESS
-        Write-TSLog "  Toutes les etapes de post-installation sont faites." -Level SUCCESS
+        Write-TSLog "  All post-installation steps are done." -Level SUCCESS
         Write-TSLog "  Duree totale : $([Math]::Round($sw.Elapsed.TotalMinutes,1)) min" -Level SUCCESS
         Write-TSLog "==============================================" -Level SUCCESS
     }

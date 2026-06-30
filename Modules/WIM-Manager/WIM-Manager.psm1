@@ -332,7 +332,7 @@ function Mount-WIMImage {
         [switch]$ReadOnly
     )
 
-    Write-WimLog "=== Montage WIM ===" -Level STEP
+    Write-WimLog "=== Mounting WIM ===" -Level STEP
 
     if (-not $MountPath) {
         $MountPath = Get-UniqueMountPath -Prefix 'wim'
@@ -409,9 +409,9 @@ function Repair-WIMMountCleanup {
     .EXAMPLE
         Repair-WIMMountCleanup
     #>
-    Write-WimLog "Nettoyage des montages orphelins..." -Level WARN
+    Write-WimLog "Cleaning orphan mounts..." -Level WARN
     Invoke-DISMCommand @('/Cleanup-Mountpoints')
-    Write-WimLog "Nettoyage termine" -Level SUCCESS
+    Write-WimLog "Cleanup complete" -Level SUCCESS
 }
 
 # -----------------------------------------------------------------------------
@@ -640,9 +640,9 @@ function Initialize-DeployDisk {
         if ($existing.PartitionStyle -ne 'RAW') {
             Write-WimLog "Nettoyage complet du disque (Clear-Disk -RemoveData -RemoveOEM)" -Level INFO
             Clear-Disk -Number $DiskNumber -RemoveData -RemoveOEM -Confirm:$false -EA Stop
-            Write-WimLog "Disque nettoye (partitions OEM/systeme incluses)" -Level SUCCESS
+            Write-WimLog "Disk cleaned (OEM/system partitions included)" -Level SUCCESS
         } else {
-            Write-WimLog "Disque deja vierge (RAW)" -Level INFO
+            Write-WimLog "Disk already blank (RAW)" -Level INFO
         }
     } catch {
         # Fallback : diskpart clean classique si Clear-Disk indisponible/echoue
@@ -708,7 +708,7 @@ exit
         throw "diskpart a echoue (code $LASTEXITCODE)"
     }
 
-    Write-WimLog "Disque initialise avec succes" -Level SUCCESS
+    Write-WimLog "Disk initialized successfully" -Level SUCCESS
 
     $result = [PSCustomObject]@{
         WindowsDrive  = "${WindowsDriveLetter}:"
@@ -849,7 +849,7 @@ exit
                     Write-WimLog "reagentc /setreimage : $rcOut" -Level INFO
                 }
             } else {
-                Write-WimLog "Winre.wim introuvable dans l'image -- WinRE non configure (non bloquant)" -Level WARN
+                Write-WimLog "Winre.wim not found in the image -- WinRE not configured (non-blocking)" -Level WARN
             }
         } catch {
             Write-WimLog "Configuration WinRE echouee : $_ (non bloquant)" -Level WARN
@@ -902,7 +902,7 @@ function Invoke-WIMDeploy {
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Write-WimLog "+==========================================+" -Level STEP
-    Write-WimLog "|   WIM-MANAGER -- Pipeline de deploiement   |" -Level STEP
+    Write-WimLog "|   WIM-MANAGER -- Deployment pipeline       |" -Level STEP
     Write-WimLog "+==========================================+" -Level STEP
 
     try {

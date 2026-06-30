@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { api } from "./api.js"
 import { STEP_TYPES, newStep } from "./stepTypes.js"
+import { useT } from "./i18n.js"
 import "./styles.css"
 
 // Normalise une reponse en tableau (PowerShell/Pode peut renvoyer un objet
@@ -32,14 +33,14 @@ function Login({ onAuthed }) {
     const r = await api.login(user, password)
     setBusy(false)
     if (r && r.success) { onAuthed() }
-    else setErr((r && r.error) || "Connexion impossible.")
+    else setErr((r && r.error) || "Connection failed.")
   }
 
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <div className="logo">PSWin<b>Deploy</b></div>
-        <div className="sub">console de deploiement // phase 2</div>
+        <div className="sub">deployment console // phase 2</div>
         <label className="field">
           <span>Identifiant</span>
           <input type="text" value={user} onChange={e => setUser(e.target.value)} autoFocus />
@@ -69,7 +70,7 @@ function CataloguePage({ toast }) {
     const r = await api.catalogue()
     setLoading(false)
     if (r && r.success) setApps(asArray(r.data))
-    else toast((r && r.error) || "Lecture du catalogue impossible.", "err")
+    else toast((r && r.error) || "Could not read the catalogue.", "err")
   }, [toast])
 
   useEffect(() => { load() }, [load])
@@ -79,42 +80,42 @@ function CataloguePage({ toast }) {
 
   async function save(app) {
     const r = await api.saveApp(app)
-    if (r && r.success) { toast(r.updated ? "Application mise a jour." : "Application ajoutee."); setEditing(null); load() }
-    else toast((r && r.error) || "Echec de l'enregistrement.", "err")
+    if (r && r.success) { toast(r.updated ? "Application mise a jour." : "Application added."); setEditing(null); load() }
+    else toast((r && r.error) || "Save failed.", "err")
   }
   async function remove(name) {
     if (!confirm(`Retirer "${name}" du catalogue ?`)) return
     const r = await api.deleteApp(name)
-    if (r && r.success) { toast("Application retiree."); load() }
-    else toast((r && r.error) || "Echec de la suppression.", "err")
+    if (r && r.success) { toast("Application removed."); load() }
+    else toast((r && r.error) || "Delete failed.", "err")
   }
 
   return (
     <div>
       <div className="page-head">
-        <h1>Catalogue d'applications</h1>
-        <p>Les applications proposees au deploiement. Chaque app declare sa methode (winget, choco, exe ou script).</p>
+        <h1>Application catalogue</h1>
+        <p>Applications offered for deployment. Each app declares its method (winget, choco, exe or script).</p>
       </div>
 
       <div className="panel">
         <div className="row" style={{ marginBottom: 14 }}>
           <select value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 200 }}>
-            <option value="">Toutes les categories</option>
+            <option value="">All categories</option>
             {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <div className="spacer" />
-          <button className="btn primary" onClick={() => setEditing(newApp())}>Ajouter une application</button>
+          <button className="btn primary" onClick={() => setEditing(newApp())}>Add an application</button>
         </div>
 
-        {loading ? <div className="empty">Chargement...</div> :
+        {loading ? <div className="empty">Loading...</div> :
           shown.length === 0 ? (
             <div className="empty">
-              <p>Aucune application{filter ? " dans cette categorie" : ""}.</p>
-              <p>Ajoute ta premiere application pour la rendre deployable.</p>
+              <p>Aucune application{filter ? " in this category" : ""}.</p>
+              <p>Add your first application to make it deployable.</p>
             </div>
           ) : (
             <table>
-              <thead><tr><th>Nom</th><th>Categorie</th><th>Methode</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Category</th><th>Methode</th><th></th></tr></thead>
               <tbody>
                 {shown.map((a, i) => (
                   <tr key={i}>
@@ -122,7 +123,7 @@ function CataloguePage({ toast }) {
                     <td>{a.Category ? <span className="badge cat">{a.Category}</span> : <span className="text-dim">—</span>}</td>
                     <td className="mono" style={{ color: "var(--text-dim)", fontSize: 12 }}>{methodOf(a)}</td>
                     <td style={{ textAlign: "right" }}>
-                      <button className="btn sm ghost" onClick={() => setEditing({ ...a })}>Modifier</button>
+                      <button className="btn sm ghost" onClick={() => setEditing({ ...a })}>Edit</button>
                       <button className="btn sm danger" onClick={() => remove(a.Name)} style={{ marginLeft: 6 }}>Retirer</button>
                     </td>
                   </tr>
@@ -154,19 +155,19 @@ function AppEditor({ app, onCancel, onSave, categories }) {
 
   return (
     <div className="panel" style={{ borderColor: "var(--accent-dim)" }}>
-      <h2>{app.Name ? `Modifier : ${app.Name}` : "Nouvelle application"}</h2>
+      <h2>{app.Name ? `Modifier : ${app.Name}` : "New application"}</h2>
       <div className="row wrap" style={{ alignItems: "flex-start", gap: 16 }}>
         <div style={{ flex: 1, minWidth: 220 }}>
-          <label className="field"><span>Nom (affiche)</span>
+          <label className="field"><span>Name (displayed)</span>
             <input type="text" value={a.Name} onChange={e => set("Name", e.target.value)} /></label>
-          <label className="field"><span>Categorie</span>
-            <input type="text" list="cats" value={a.Category || ""} onChange={e => set("Category", e.target.value)} placeholder="Navigateurs, Bureautique..." />
+          <label className="field"><span>Category</span>
+            <input type="text" list="cats" value={a.Category || ""} onChange={e => set("Category", e.target.value)} placeholder="Browsers, Office..." />
             <datalist id="cats">{categories.map(c => <option key={c} value={c} />)}</datalist></label>
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
           <label className="field"><span>Script d'installation dedie (.ps1) — methode unique</span>
-            <input type="text" value={a.Script || ""} onChange={e => set("Script", e.target.value)} placeholder="\\IP\Logiciels\x.ps1 ou installs\x.ps1" /></label>
-          {useScript && <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: -6 }}>Script renseigne : les autres methodes sont ignorees.</p>}
+            <input type="text" value={a.Script || ""} onChange={e => set("Script", e.target.value)} placeholder="\\IP\Software\x.ps1 or installs\x.ps1" /></label>
+          {useScript && <p style={{ color: "var(--text-dim)", fontSize: 12, marginTop: -6 }}>Script set: other methods are ignored.</p>}
         </div>
       </div>
 
@@ -179,7 +180,7 @@ function AppEditor({ app, onCancel, onSave, categories }) {
               <input type="text" value={a.ChocoId || ""} onChange={e => set("ChocoId", e.target.value)} placeholder="firefox" /></label>
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <label className="field"><span>Installeur (exe/msi du partage Logiciels)</span>
+            <label className="field"><span>Installer (exe/msi from the Software share)</span>
               <input type="text" value={a.Installer || ""} onChange={e => set("Installer", e.target.value)} /></label>
             <label className="field"><span>Arguments silencieux</span>
               <input type="text" value={a.Args || ""} onChange={e => set("Args", e.target.value)} placeholder="/S" /></label>
@@ -189,8 +190,8 @@ function AppEditor({ app, onCancel, onSave, categories }) {
 
       <div className="row" style={{ marginTop: 8 }}>
         <div className="spacer" />
-        <button className="btn ghost" onClick={onCancel}>Annuler</button>
-        <button className="btn primary" onClick={() => onSave(a)} disabled={!a.Name}>Enregistrer</button>
+        <button className="btn ghost" onClick={onCancel}>Cancel</button>
+        <button className="btn primary" onClick={() => onSave(a)} disabled={!a.Name}>Save</button>
       </div>
     </div>
   )
@@ -205,7 +206,7 @@ function DriversPage({ toast }) {
       const r = await api.drivers()
       setLoading(false)
       if (r && r.success) setDrivers(asArray(r.data))
-      else toast((r && r.error) || "Lecture des drivers impossible.", "err")
+      else toast((r && r.error) || "Could not read the drivers.", "err")
     })()
   }, [toast])
 
@@ -213,15 +214,15 @@ function DriversPage({ toast }) {
     <div>
       <div className="page-head">
         <h1>Drivers</h1>
-        <p>Les modeles de drivers disponibles sur le partage. Depose les dossiers sur le serveur ; ils apparaissent ici.</p>
+        <p>Driver models available on the share. Drop the folders on the server; they appear here.</p>
       </div>
       <div className="panel">
-        {loading ? <div className="empty">Chargement...</div> :
+        {loading ? <div className="empty">Loading...</div> :
           drivers.length === 0 ? (
-            <div className="empty"><p>Aucun modele de drivers trouve.</p><p>Cree un dossier par modele sous le partage Drivers (ex : Dell-Latitude-5540).</p></div>
+            <div className="empty"><p>No driver model found.</p><p>Create one folder per model under the Drivers share (e.g. Dell-Latitude-5540).</p></div>
           ) : (
             <table>
-              <thead><tr><th>Modele</th><th>Fichiers .inf</th><th>Chemin</th></tr></thead>
+              <thead><tr><th>Model</th><th>.inf files</th><th>Chemin</th></tr></thead>
               <tbody>
                 {drivers.map((d, i) => (
                   <tr key={i}>
@@ -239,7 +240,8 @@ function DriversPage({ toast }) {
 }
 
 // ─── Page : Suivi ──────────────────────────────────────────
-function MonitorPage({ toast }) {
+function MonitorPage({ toast, t }) {
+  if (!t) t = (k) => k   // securite si appele sans t
   const [list, setList] = useState([])
   const [waiting, setWaiting] = useState([])
   const [loading, setLoading] = useState(true)
@@ -287,20 +289,20 @@ function MonitorPage({ toast }) {
     const c = await api.sequenceContent(seqType, seqName)
     const psd1 = c && c.success ? (c.content || c.data) : null
     if (!psd1) {
-      setBusy(""); toast("Impossible de lire la sequence.", "err"); return
+      setBusy(""); toast(t("monitor.push.read_err"), "err"); return
     }
     const r = await api.pushSequence(pushFor.Id, psd1, seqName)
     setBusy("")
-    if (r && r.success) { toast(`Sequence poussee vers ${pushFor.ComputerName || pushFor.Id}.`); setPushFor(null) }
-    else toast((r && r.error) || "Push impossible.", "err")
+    if (r && r.success) { toast(t("monitor.push.ok", pushFor.ComputerName || pushFor.Id)); setPushFor(null) }
+    else toast((r && r.error) || t("monitor.push.err"), "err")
   }
 
   async function cancelWait(node) {
     setBusy(node.Id)
     const r = await api.cancelWaiting(node.Id)
     setBusy("")
-    if (r && r.success) toast("Attente annulee.")
-    else toast((r && r.error) || "Annulation impossible.", "err")
+    if (r && r.success) toast(t("monitor.cancel.ok"))
+    else toast((r && r.error) || "Cancel failed.", "err")
   }
 
   const statusBadge = (s) => {
@@ -312,16 +314,16 @@ function MonitorPage({ toast }) {
   return (
     <div>
       <div className="page-head">
-        <h1>Suivi des deploiements</h1>
-        <p>Les postes en cours de deploiement. Mise a jour automatique toutes les 5 secondes.</p>
+        <h1>Deployment monitoring</h1>
+        <p>Machines currently deploying. Auto-refresh every 5 seconds.</p>
       </div>
       <div className="panel">
-        {loading ? <div className="empty">Chargement...</div> :
+        {loading ? <div className="empty">Loading...</div> :
           list.length === 0 ? (
-            <div className="empty"><p>Aucun deploiement en cours.</p><p>Les postes apparaissent ici des qu'ils demarrent la phase 2.</p></div>
+            <div className="empty"><p>No deployment in progress.</p><p>Machines appear here as soon as they start phase 2.</p></div>
           ) : (
             <table>
-              <thead><tr><th>Machine</th><th>MAC</th><th>Etat</th><th>Etape</th><th style={{ width: 160 }}>Avancement</th></tr></thead>
+              <thead><tr><th>Machine</th><th>MAC</th><th>Etat</th><th>Step</th><th style={{ width: 160 }}>Avancement</th></tr></thead>
               <tbody>
                 {list.map((d, i) => (
                   <tr key={i}>
@@ -344,9 +346,9 @@ function MonitorPage({ toast }) {
 
       {/* Section : postes en attente d'une sequence poussee depuis le web */}
       <div className="panel">
-        <h2 style={{ marginTop: 0 }}>En attente de configuration</h2>
+        <h2 style={{ marginTop: 0 }}>{t("monitor.waiting.title")}</h2>
         {waiting.length === 0 ? (
-          <div className="empty"><p>Aucun poste en attente.</p><p>Un poste apparait ici s'il choisit "Attendre une sequence" en phase 2.</p></div>
+          <div className="empty"><p>{t("monitor.waiting.empty")}</p><p>{t("monitor.waiting.hint")}</p></div>
         ) : (
           <table>
             <thead><tr><th>Machine</th><th>MAC</th><th>Depuis</th><th>Etat</th><th style={{ width: 220 }}></th></tr></thead>
@@ -359,8 +361,8 @@ function MonitorPage({ toast }) {
                   <td>{n.Pushed ? <span className="badge ok">sequence envoyee</span> : <span className="badge warn">en attente</span>}</td>
                   <td style={{ textAlign: "right" }}>
                     <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
-                      <button className="btn sm" onClick={() => openPush(n)} disabled={busy === n.Id || n.Pushed}>Pousser une sequence</button>
-                      <button className="btn sm ghost" onClick={() => cancelWait(n)} disabled={busy === n.Id}>Annuler</button>
+                      <button className="btn sm" onClick={() => openPush(n)} disabled={busy === n.Id || n.Pushed}>{t("monitor.waiting.push")}</button>
+                      <button className="btn sm ghost" onClick={() => cancelWait(n)} disabled={busy === n.Id}>{t("monitor.waiting.cancel")}</button>
                     </div>
                   </td>
                 </tr>
@@ -375,17 +377,17 @@ function MonitorPage({ toast }) {
         <div className="modal-backdrop" onClick={() => setPushFor(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ padding: 20 }}>
             <div className="row" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0 }}>Pousser une sequence vers {pushFor.ComputerName || pushFor.Id}</h2>
+              <h2 style={{ margin: 0 }}>{t("monitor.push.title", pushFor.ComputerName || pushFor.Id)}</h2>
               <div className="spacer" />
-              <button className="btn ghost sm" onClick={() => setPushFor(null)}>Fermer</button>
+              <button className="btn ghost sm" onClick={() => setPushFor(null)}>Close</button>
             </div>
             <p style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 0 }}>
               Choisis une sequence existante. Le poste la recevra et la jouera immediatement.
             </p>
             {seqList.length === 0 ? (
               <div className="empty">
-                <p>Aucune sequence disponible.</p>
-                <p>Cree-la d'abord dans l'editeur, puis reviens la pousser.</p>
+                <p>No sequence available.</p>
+                <p>Create it first in the editor, then come back to push it.</p>
               </div>
             ) : (
               <div style={{ maxHeight: 360, overflowY: "auto" }}>
@@ -397,7 +399,7 @@ function MonitorPage({ toast }) {
                     </div>
                     <div className="spacer" />
                     <button className="btn sm" onClick={() => doPush(s)} disabled={busy === pushFor.Id}>
-                      {busy === pushFor.Id ? "Envoi..." : "Pousser"}
+                      {busy === pushFor.Id ? "Envoi..." : "Push"}
                     </button>
                   </div>
                 ))}
@@ -418,7 +420,7 @@ function SequencesPage({ toast }) {
   const [scripts, setScripts] = useState([])
   const [drivers, setDrivers] = useState([])
   const [seqList, setSeqList] = useState([])
-  const [loadFrom, setLoadFrom] = useState("")   // "type::name" du template a charger
+  const [loadFrom, setLoadFrom] = useState("")   // "type::name" of the template to load
   const [addType, setAddType] = useState("InstallApps")
 
   const loadSeqList = useCallback(async () => {
@@ -442,11 +444,11 @@ function SequencesPage({ toast }) {
     if (!loadFrom) return
     const [type, name] = loadFrom.split("::")
     const r = await api.sequenceObject(type, name)
-    if (!(r && r.success && r.data)) { toast((r && r.error) || "Chargement impossible.", "err"); return }
+    if (!(r && r.success && r.data)) { toast((r && r.error) || "Loading failed.", "err"); return }
     const seq = r.data
     const loadedSteps = asArray(seq.Steps).map(s => ({
       Id: s.Id || `step-${Math.random().toString(36).slice(2, 8)}`,
-      Name: s.Name || s.Type || "Etape",
+      Name: s.Name || s.Type || "Step",
       Type: s.Type,
       Phase: s.Phase || "Windows",
       Enabled: s.Enabled !== false,
@@ -468,39 +470,39 @@ function SequencesPage({ toast }) {
 
   async function save() {
     if (target.kind === "template") {
-      if (!target.value) { toast("Donne un nom au template.", "err"); return }
+      if (!target.value) { toast("Give the template a name.", "err"); return }
       const seq = { Name: target.value, Steps: steps }
       const r = await api.saveSequenceTemplate(target.value, seq)
       if (r && r.success) { toast(`Template enregistre : ${r.path}`); loadSeqList() }
-      else toast((r && r.error) || "Echec de l'enregistrement.", "err")
+      else toast((r && r.error) || "Save failed.", "err")
       return
     }
-    if (!target.value) { toast("Renseigne le nom de machine ou la MAC cible.", "err"); return }
+    if (!target.value) { toast("Enter the target machine name or MAC.", "err"); return }
     const seq = { Name: `Sequence ${target.value}`, Steps: steps }
     const r = target.kind === "by-name"
       ? await api.saveSequenceByName(target.value, seq)
       : await api.saveSequenceByMac(target.value, seq)
     if (r && r.success) toast(`Sequence enregistree : ${r.path}`)
-    else toast((r && r.error) || "Echec de l'enregistrement.", "err")
+    else toast((r && r.error) || "Save failed.", "err")
   }
 
   return (
     <div>
       <div className="page-head">
         <h1>Editeur de sequence</h1>
-        <p>Compose la sequence de post-installation, etape par etape, puis enregistre-la pour une machine (par nom ou par MAC).</p>
+        <p>Compose the post-installation sequence step by step, then save it for a machine (by name or by MAC).</p>
       </div>
 
       <div className="panel">
-        <h2>Cible</h2>
+        <h2>Target</h2>
         <div className="row wrap">
           <select value={target.kind} onChange={e => setTarget({ ...target, kind: e.target.value })} style={{ width: 200 }}>
             <option value="template">Template reutilisable</option>
-            <option value="by-name">Par nom de machine</option>
-            <option value="by-mac">Par adresse MAC</option>
+            <option value="by-name">By machine name</option>
+            <option value="by-mac">By MAC address</option>
           </select>
           <input type="text" value={target.value} onChange={e => setTarget({ ...target, value: e.target.value })}
-            placeholder={target.kind === "by-name" ? "PC-COMPTA-01" : target.kind === "by-mac" ? "AABBCCDDEEFF" : "Poste-Standard"} style={{ flex: 1 }} />
+            placeholder={target.kind === "by-name" ? "PC-COMPTA-01" : target.kind === "by-mac" ? "AABBCCDDEEFF" : "Workstation-Standard"} style={{ flex: 1 }} />
         </div>
         {target.kind === "template" && (
           <p style={{ color: "var(--text-dim)", fontSize: 12.5, marginTop: 8, marginBottom: 0 }}>
@@ -510,13 +512,13 @@ function SequencesPage({ toast }) {
       </div>
 
       <div className="panel">
-        <h2>Partir d'une sequence existante</h2>
+        <h2>Start from an existing sequence</h2>
         <p style={{ color: "var(--text-dim)", fontSize: 12.5, marginTop: -4 }}>
-          Charge les etapes d'un template (ou d'une sequence existante) comme point de depart. Tu peux ensuite changer la cible ci-dessus pour la decliner en by-name / by-mac. La source n'est pas modifiee.
+          Loads the steps of a template (or an existing sequence) as a starting point. You can then change the target above to derive it as by-name / by-mac. The source is not modified.
         </p>
         <div className="row wrap">
           <select value={loadFrom} onChange={e => setLoadFrom(e.target.value)} style={{ flex: 1, minWidth: 220 }}>
-            <option value="">— choisir une sequence —</option>
+            <option value="">— choose a sequence —</option>
             {seqList.filter(s => s.Type === "template").length > 0 && (
               <optgroup label="Templates">
                 {seqList.filter(s => s.Type === "template").map((s, i) => (
@@ -525,21 +527,21 @@ function SequencesPage({ toast }) {
               </optgroup>
             )}
             {seqList.filter(s => s.Type === "by-name").length > 0 && (
-              <optgroup label="Par nom">
+              <optgroup label="By name">
                 {seqList.filter(s => s.Type === "by-name").map((s, i) => (
                   <option key={`n${i}`} value={`by-name::${s.Name}`}>{s.Name}</option>
                 ))}
               </optgroup>
             )}
             {seqList.filter(s => s.Type === "by-mac").length > 0 && (
-              <optgroup label="Par MAC">
+              <optgroup label="By MAC">
                 {seqList.filter(s => s.Type === "by-mac").map((s, i) => (
                   <option key={`m${i}`} value={`by-mac::${s.Name}`}>{s.Name}</option>
                 ))}
               </optgroup>
             )}
           </select>
-          <button className="btn" onClick={loadTemplate} disabled={!loadFrom}>Charger les etapes</button>
+          <button className="btn" onClick={loadTemplate} disabled={!loadFrom}>Load steps</button>
         </div>
       </div>
 
@@ -550,11 +552,11 @@ function SequencesPage({ toast }) {
           <select value={addType} onChange={e => setAddType(e.target.value)} style={{ width: 220 }}>
             {Object.entries(STEP_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
-          <button className="btn" onClick={addStep}>Ajouter l'etape</button>
+          <button className="btn" onClick={addStep}>Add step</button>
         </div>
 
         {steps.length === 0 ? (
-          <div className="empty"><p>Sequence vide.</p><p>Ajoute une premiere etape pour commencer.</p></div>
+          <div className="empty"><p>Sequence vide.</p><p>Add a first step to get started.</p></div>
         ) : steps.map((s, i) => (
           <StepCard key={s.Id} step={s} ord={i + 1}
             onChange={(ns) => updateStep(i, ns)} onRemove={() => removeStep(i)}
@@ -565,7 +567,7 @@ function SequencesPage({ toast }) {
 
       <div className="row">
         <div className="spacer" />
-        <button className="btn primary" onClick={save} disabled={steps.length === 0}>Enregistrer la sequence</button>
+        <button className="btn primary" onClick={save} disabled={steps.length === 0}>Save sequence</button>
       </div>
     </div>
   )
@@ -590,7 +592,7 @@ function StepCard({ step, ord, onChange, onRemove, onUp, onDown, catalogue, scri
       {open && (
         <div className="step-body">
           <p style={{ color: "var(--text-dim)", fontSize: 12.5, marginTop: 8 }}>{def?.desc}</p>
-          <label className="field"><span>Nom de l'etape</span>
+          <label className="field"><span>Step name</span>
             <input type="text" value={step.Name} onChange={e => onChange({ ...step, Name: e.target.value })} /></label>
 
           {def?.fields.map(f => (
@@ -645,7 +647,7 @@ function StepField({ field, value, onChange, catalogue, scripts, drivers }) {
     return (
       <label className="field"><span>{field.label}</span>
         <select value={value || ""} onChange={e => onChange(e.target.value)}>
-          <option value="">— aucun —</option>
+          <option value="">— none —</option>
           {drivers.map((d, i) => <option key={i} value={d.Name}>{d.Name} ({d.InfCount} .inf)</option>)}
         </select>
       </label>
@@ -687,7 +689,7 @@ function CodeViewer({ title, content, onClose }) {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
           <span className="mono">{title}</span>
-          <button className="btn sm ghost" onClick={onClose}>Fermer</button>
+          <button className="btn sm ghost" onClick={onClose}>Close</button>
         </div>
         <pre className="code-view">{content || "(vide)"}</pre>
       </div>
@@ -706,29 +708,29 @@ function ScriptsPage({ toast }) {
       const r = await api.scripts()
       setLoading(false)
       if (r && r.success) setScripts(asArray(r.data))
-      else toast((r && r.error) || "Lecture des scripts impossible.", "err")
+      else toast((r && r.error) || "Could not read the scripts.", "err")
     })()
   }, [toast])
 
   async function open(s) {
     const r = await api.scriptContent(s.RelativePath)
     if (r && r.success) setView({ title: s.RelativePath, content: r.content })
-    else toast((r && r.error) || "Lecture du script impossible.", "err")
+    else toast((r && r.error) || "Could not read the script.", "err")
   }
 
   return (
     <div>
       <div className="page-head">
         <h1>Scripts</h1>
-        <p>Les scripts PowerShell du partage, utilisables dans les etapes RunScript. Clique pour voir le contenu.</p>
+        <p>PowerShell scripts from the share, usable in RunScript steps. Click to view the content.</p>
       </div>
       <div className="panel">
-        {loading ? <div className="empty">Chargement...</div> :
+        {loading ? <div className="empty">Loading...</div> :
           scripts.length === 0 ? (
-            <div className="empty"><p>Aucun script trouve.</p><p>Depose des fichiers .ps1 sur le partage Scripts.</p></div>
+            <div className="empty"><p>No script found.</p><p>Drop .ps1 files on the Scripts share.</p></div>
           ) : (
             <table>
-              <thead><tr><th>Nom</th><th>Chemin relatif</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Chemin relatif</th><th></th></tr></thead>
               <tbody>
                 {scripts.map((s, i) => (
                   <tr key={i}>
@@ -761,7 +763,7 @@ function SequenceListPage({ toast }) {
     const r = await api.sequences()
     setLoading(false)
     if (r && r.success) setList(asArray(r.data))
-    else toast((r && r.error) || "Lecture des sequences impossible.", "err")
+    else toast((r && r.error) || "Could not read the sequences.", "err")
   }, [toast])
 
   useEffect(() => { load() }, [load])
@@ -772,12 +774,12 @@ function SequenceListPage({ toast }) {
     const r = await api.sequenceContent(s.Type, s.Name)
     setOpening("")
     if (r && r.success) setView({ title: `${s.Type} / ${s.Name}.psd1`, content: r.content })
-    else toast((r && r.error) || "Lecture de la sequence impossible.", "err")
+    else toast((r && r.error) || "Could not read the sequence.", "err")
   }
 
   const typeBadge = (t) => {
     const m = { template: "cat", "by-name": "info", "by-mac": "warn" }
-    const lbl = { template: "template", "by-name": "par nom", "by-mac": "par MAC" }
+    const lbl = { template: "template", "by-name": "by name", "by-mac": "by MAC" }
     return <span className={`badge ${m[t] || ""}`}>{lbl[t] || t}</span>
   }
   const shown = list.filter(s => !filter || s.Type === filter)
@@ -786,25 +788,25 @@ function SequenceListPage({ toast }) {
     <div>
       <div className="page-head">
         <h1>Sequences</h1>
-        <p>Toutes les sequences disponibles : templates reutilisables, et sequences assignees par nom ou par MAC. Clique pour voir le contenu.</p>
+        <p>All available sequences: reusable templates, and sequences assigned by name or MAC. Click to view the content.</p>
       </div>
       <div className="panel">
         <div className="row" style={{ marginBottom: 14 }}>
           <select value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 200 }}>
-            <option value="">Tous les types</option>
+            <option value="">All types</option>
             <option value="template">Templates</option>
-            <option value="by-name">Par nom</option>
-            <option value="by-mac">Par MAC</option>
+            <option value="by-name">By name</option>
+            <option value="by-mac">By MAC</option>
           </select>
           <div className="spacer" />
           <button className="btn ghost" onClick={load}>Rafraichir</button>
         </div>
-        {loading ? <div className="empty">Chargement...</div> :
+        {loading ? <div className="empty">Loading...</div> :
           shown.length === 0 ? (
-            <div className="empty"><p>Aucune sequence{filter ? " de ce type" : ""}.</p><p>Cree un template depuis l'editeur de sequence.</p></div>
+            <div className="empty"><p>Aucune sequence{filter ? " of this type" : ""}.</p><p>Cree un template depuis l'editeur de sequence.</p></div>
           ) : (
             <table>
-              <thead><tr><th>Nom</th><th>Type</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Type</th><th></th></tr></thead>
               <tbody>
                 {shown.map((s, i) => (
                   <tr key={i}>
@@ -827,7 +829,8 @@ function SequenceListPage({ toast }) {
 }
 
 // ─── Page : Statistiques ───────────────────────────────────
-function StatsPage({ toast }) {
+function StatsPage({ toast, t }) {
+  if (!t) t = (k) => k
   const [stats, setStats] = useState(null)
   const [completed, setCompleted] = useState([])
   const [total, setTotal] = useState(0)
@@ -847,7 +850,7 @@ function StatsPage({ toast }) {
     const c = await api.deployCompleted(PAGE_SIZE, p * PAGE_SIZE)
     setLoading(false)
     if (c && c.success) { setCompleted(asArray(c.data)); setTotal(c.total || 0) }
-    else toast((c && c.error) || "Lecture impossible.", "err")
+    else toast((c && c.error) || "Could not read.", "err")
   }, [toast])
 
   useEffect(() => { loadStats() }, [loadStats])
@@ -857,18 +860,18 @@ function StatsPage({ toast }) {
     setBusy(id)
     const r = await api.deleteDeployment(id)
     setBusy("")
-    if (r && r.success) { toast("Suivi supprime."); loadPage(page); loadStats() }
-    else toast((r && r.error) || "Suppression impossible.", "err")
+    if (r && r.success) { toast("Entry removed."); loadPage(page); loadStats() }
+    else toast((r && r.error) || "Delete failed.", "err")
   }
 
   async function purge() {
-    const months = parseInt(window.prompt("Supprimer les deploiements termines plus vieux que combien de mois ?", "12"), 10)
+    const months = parseInt(window.prompt("Delete completed deployments older than how many months?", "12"), 10)
     if (!months || months <= 0) return
     setBusy("purge")
     const r = await api.purgeDeployments(months)
     setBusy("")
     if (r && r.success) { toast(`${r.purged} suivi(s) purge(s) (> ${r.months} mois).`); setPage(0); loadPage(0); loadStats() }
-    else toast((r && r.error) || "Purge impossible.", "err")
+    else toast((r && r.error) || "Purge failed.", "err")
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -887,18 +890,18 @@ function StatsPage({ toast }) {
   return (
     <div>
       <div className="page-head">
-        <h1>Statistiques</h1>
-        <p>Bilan des deploiements termines : volumes par periode et durees.</p>
+        <h1>{t("stats.title")}</h1>
+        <p>Summary of completed deployments: volumes per period and durations.</p>
       </div>
 
-      {loading ? <div className="panel"><div className="empty">Chargement...</div></div> : (
+      {loading ? <div className="panel"><div className="empty">Loading...</div></div> : (
         <>
           <div className="stat-grid">
-            <div className="stat-card"><div className="stat-num">{stats?.Today ?? 0}</div><div className="stat-lbl">Aujourd'hui</div></div>
-            <div className="stat-card"><div className="stat-num">{stats?.Week ?? 0}</div><div className="stat-lbl">Cette semaine</div></div>
-            <div className="stat-card"><div className="stat-num">{stats?.Month ?? 0}</div><div className="stat-lbl">Ce mois</div></div>
-            <div className="stat-card"><div className="stat-num">{stats?.Year ?? 0}</div><div className="stat-lbl">Cette annee</div></div>
-            <div className="stat-card"><div className="stat-num">{stats?.Total ?? 0}</div><div className="stat-lbl">Total</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Today ?? 0}</div><div className="stat-lbl">{t("stats.today")}</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Week ?? 0}</div><div className="stat-lbl">{t("stats.week")}</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Month ?? 0}</div><div className="stat-lbl">{t("stats.month")}</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Year ?? 0}</div><div className="stat-lbl">{t("stats.year")}</div></div>
+            <div className="stat-card"><div className="stat-num">{stats?.Total ?? 0}</div><div className="stat-lbl">{t("stats.total")}</div></div>
           </div>
 
           <div className="panel">
@@ -912,13 +915,13 @@ function StatsPage({ toast }) {
 
           <div className="panel">
             <div className="row" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0 }}>Deploiements termines</h2>
+              <h2 style={{ margin: 0 }}>Completed deployments</h2>
               <div className="spacer" />
-              <button className="btn ghost" onClick={purge} disabled={busy === "purge"}>{busy === "purge" ? "Purge..." : "Purger les anciens"}</button>
+              <button className="btn ghost" onClick={purge} disabled={busy === "purge"}>{busy === "purge" ? "..." : t("stats.purge")}</button>
               <button className="btn ghost" onClick={() => { loadPage(page); loadStats() }}>Rafraichir</button>
             </div>
             {completed.length === 0 ? (
-              <div className="empty"><p>Aucun deploiement termine{page > 0 ? " sur cette page" : ""}.</p></div>
+              <div className="empty"><p>Aucun deploiement termine{page > 0 ? " on this page" : ""}.</p></div>
             ) : (
               <>
               <table>
@@ -932,7 +935,7 @@ function StatsPage({ toast }) {
                       <td className="mono">{fmtDur(d.DurationSec)}</td>
                       <td>{d.Completed ? <span className="badge ok">termine</span> : <span className="badge warn">{d.Status}</span>}</td>
                       <td style={{ textAlign: "right" }}>
-                        <button className="btn sm ghost" onClick={() => removeOne(d.Id)} disabled={busy === d.Id} title="Supprimer ce suivi">
+                        <button className="btn sm ghost" onClick={() => removeOne(d.Id)} disabled={busy === d.Id} title="Delete this entry">
                           {busy === d.Id ? "..." : "Suppr."}
                         </button>
                       </td>
@@ -977,6 +980,7 @@ const FOOT_ICONS = {
 }
 
 export default function App() {
+  const { t } = useT()
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
   const [page, setPage] = useState("editor")
@@ -998,7 +1002,7 @@ export default function App() {
     setAuthed(false)
   }
 
-  if (checking) return <div className="login-wrap"><div style={{ color: "var(--text-dim)" }}>Chargement...</div></div>
+  if (checking) return <div className="login-wrap"><div style={{ color: "var(--text-dim)" }}>Loading...</div></div>
   if (!authed) return <Login onAuthed={() => setAuthed(true)} />
 
   const Page = PAGES.find(p => p.id === page)?.comp || SequencesPage
@@ -1013,13 +1017,13 @@ export default function App() {
         <nav className="nav">
           {PAGES.map(p => (
             <button key={p.id} className={page === p.id ? "active" : ""} onClick={() => setPage(p.id)}>
-              <span className="dot" />{p.label}
+              <span className="dot" />{t(`nav.${p.id}`)}
             </button>
           ))}
         </nav>
         <div className="sidebar-foot">
-          connecte
-          <button onClick={logout}>Se deconnecter</button>
+          {t("nav.connected")}
+          <button onClick={logout}>{t("nav.logout")}</button>
           {links.length > 0 && (
             <div className="foot-links">
               {links.map((l) => (
@@ -1033,7 +1037,7 @@ export default function App() {
         </div>
       </aside>
       <main className="main">
-        <Page toast={toast} />
+        <Page toast={toast} t={t} />
       </main>
       {toastNode}
     </div>

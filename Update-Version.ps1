@@ -42,7 +42,7 @@ if ($NewVersion) {
     Set-Content -Path $versionFile -Value $NewVersion -Encoding ASCII -NoNewline
     Write-OK "VERSION ecrit : $NewVersion"
 }
-if (-not (Test-Path $versionFile)) { throw "Fichier VERSION introuvable. Fournir -NewVersion." }
+if (-not (Test-Path $versionFile)) { throw "VERSION file not found. Provide -NewVersion." }
 $version = (Get-Content $versionFile -Raw).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION malforme : '$version'." }
 Write-Info "Propagation de la version $version dans le projet..."

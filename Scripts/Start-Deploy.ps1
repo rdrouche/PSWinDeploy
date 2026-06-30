@@ -104,7 +104,7 @@ function Connect-DeployShares {
     if ($NetworkShare -match '\\\\([^\\]+)\\') { $server = $Matches[1] }
 
     if ($Mode -eq 'Skip') {
-        Write-Info "Mode Skip -- partages geres par startnet.cmd"
+        Write-Info "Skip mode -- shares handled by startnet.cmd"
         if (Test-Path $NetworkShare -ErrorAction SilentlyContinue) {
             Write-OK "Partage $NetworkShare accessible"
             return $true
@@ -127,7 +127,7 @@ function Connect-DeployShares {
             Write-Info "[NetShare] Ping $pingTarget : OK"
         } else {
             Write-Warn "[NetShare] Ping $pingTarget : ECHEC -- serveur inaccessible ou ICMP bloque"
-            Write-Warn "[NetShare] Verifier : routage reseau, VLAN, pare-feu sur le serveur de deploiement"
+            Write-Warn "[NetShare] Check: network routing, VLAN, firewall on the deployment server"
         }
     }
 
@@ -194,7 +194,7 @@ function Connect-DeployShares {
             }
         }
         Write-Err "Connexion partages echouee : $_"
-        Write-Warn "Deploiement possible si partages accessibles par autre moyen."
+        Write-Warn "Deployment possible if shares are accessible another way."
         return $false
     }
 }
@@ -218,7 +218,7 @@ function Invoke-ScratchWizard {
     }
 
     Write-Host ""
-    Write-Info "Deploiement interactif -- repondez aux questions."
+    Write-Info "Interactive deployment -- answer the questions."
     Write-Host ""
 
     # Detecter le mode avance : lire directement le PSD1 de config (WinPE n'a pas le module Config)
@@ -256,7 +256,7 @@ function Invoke-ScratchWizard {
     if ($advancedMode) { Write-Info "Mode avance ACTIF (options de diagnostic disponibles)." }
 
     # ?? 1. IMAGE OS ?????????????????????????????????????????????????????????
-    Write-Step "Etape 1/6 -- Image Windows"
+    Write-Step "Step 1/6 -- Windows image"
     $selectedWim   = ''
     $selectedIndex = 1
     $imgSharePath  = if ((Get-Variable -Name 'ImageShare' -Scope Script -EA SilentlyContinue) -and $script:ImageShare) { $script:ImageShare } else { "$NetworkShare\Images" }
@@ -305,7 +305,7 @@ function Invoke-ScratchWizard {
                 Write-Host "  [$($i+1)] $($imgLabels[$i])" -ForegroundColor White
             }
             Write-Host ""
-            Write-Host "  [?]  Image [1] : " -ForegroundColor Yellow -NoNewline
+            Write-Host "  [?]  Image [1]: " -ForegroundColor Yellow -NoNewline
             $c = (Read-Host).Trim()
             $idx = if ($c -match '^\d+$' -and [int]$c -ge 1 -and [int]$c -le $osImages.Count) { [int]$c - 1 } else { 0 }
         }
@@ -345,14 +345,14 @@ function Invoke-ScratchWizard {
     }
 
     # ?? 2. NOM MACHINE ???????????????????????????????????????????????????????
-    Write-Host ""; Write-Step "Etape 2/6 -- Identite"
+    Write-Host ""; Write-Step "Step 2/6 -- Identity"
     Write-Host "  [i]  Laissez VIDE pour que Windows genere un nom aleatoire unique." -ForegroundColor DarkGray
-    Write-Host "       (recommande pour deploiements multiples avec jonction AD)" -ForegroundColor DarkGray
-    Write-Host "  [?]  Nom de la machine [auto] : " -ForegroundColor Yellow -NoNewline
+    Write-Host "       (recommended for multiple deployments with AD join)" -ForegroundColor DarkGray
+    Write-Host "  [?]  Machine name [auto]: " -ForegroundColor Yellow -NoNewline
     $machineName = (Read-Host).Trim()
     if ([string]::IsNullOrWhiteSpace($machineName)) {
         $machineName = ''
-        Write-OK "Machine : (nom genere automatiquement par Windows)"
+        Write-OK "Machine: (name generated automatically by Windows)"
     } else {
         Write-OK "Machine : $machineName"
     }
@@ -366,11 +366,11 @@ function Invoke-ScratchWizard {
     $domainOU   = ''
 
     # ?? 4. CONFIG ?????????????????????????????????????????????????????????????
-    Write-Host ""; Write-Step "Etape 4/6 -- Configuration"
+    Write-Host ""; Write-Step "Step 4/6 -- Configuration"
     # Les mises a jour Windows sont desormais gerees par les scripts PostDeploy
     # (Scripts\PostDeploy\10-windows-update.ps1), executes en phase 2. Plus
     # besoin de le demander ici.
-    Write-Host "  [i]  MAJ Windows : gerees par les scripts post-deploiement (phase 2)" -ForegroundColor DarkGray
+    Write-Host "  [i]  Windows updates: handled by post-deployment scripts (phase 2)" -ForegroundColor DarkGray
 
     $selectedApps    = @()
     $selectedScripts = @()
@@ -385,7 +385,7 @@ function Invoke-ScratchWizard {
             if ($seqInfo.Found) {
                 Write-OK "Sequence de phase 2 affectee a ce poste : $($seqInfo.By) -> $(Split-Path $seqInfo.Path -Leaf)"
             } else {
-                Write-Info "Aucune sequence affectee a ce poste. L'assistant sera propose apres le reboot."
+                Write-Info "No sequence assigned to this machine. The assistant will be offered after reboot."
             }
         }
     } catch {}
@@ -412,31 +412,31 @@ function Invoke-ScratchWizard {
         $advNoPhase2 = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
         Write-Host "  [?]  Copier l'unattend genere pour debug ? [o/N]" -ForegroundColor Yellow -NoNewline
-        Write-Host "  (sauve une copie horodatee sur le partage) : " -ForegroundColor DarkGray -NoNewline
+        Write-Host "  (saves a timestamped copy on the share): " -ForegroundColor DarkGray -NoNewline
         $advCopyUnattend = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
-        Write-Host "  [?]  PAS de reboot automatique en fin de deploiement ? [o/N]" -ForegroundColor Yellow -NoNewline
-        Write-Host "  (tu lanceras 'wpeutil reboot' toi-meme -- diagnostic) : " -ForegroundColor DarkGray -NoNewline
+        Write-Host "  [?]  NO automatic reboot at end of deployment? [y/N]" -ForegroundColor Yellow -NoNewline
+        Write-Host "  (you will run 'wpeutil reboot' yourself -- diagnostic): " -ForegroundColor DarkGray -NoNewline
         $advNoReboot = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
         Write-Host "  --- Diagnostic BSOD : desactiver des operations suspectes ---" -ForegroundColor DarkCyan
         Write-Host "  [?]  NE PAS copier Deploy sur la cible (Copy-DeployToTarget) ? [o/N] : " -ForegroundColor Yellow -NoNewline
         $advNoCopyDeploy = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
-        Write-Host "  [?]  NE PAS configurer RunOnce (manip ruche offline) ? [o/N] : " -ForegroundColor Yellow -NoNewline
+        Write-Host "  [?]  Do NOT configure RunOnce (offline hive operation)? [y/N]: " -ForegroundColor Yellow -NoNewline
         $advNoRunOnce = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
-        if ($advNoAutoLogon) { Write-Warn "Autologon DESACTIVE pour ce deploiement (diagnostic)" }
-        if ($advSkipUnattend) { Write-Warn "Unattend SAUTE pour ce deploiement (test WIM brut)" }
+        if ($advNoAutoLogon) { Write-Warn "Autologon DISABLED for this deployment (diagnostic)" }
+        if ($advSkipUnattend) { Write-Warn "Unattend SKIPPED for this deployment (raw WIM test)" }
         if ($advNoPhase2)     { Write-Warn "Phase 2 NON lancee (autologon temoin seulement)" }
-        if ($advCopyUnattend) { Write-Warn "L'unattend genere sera copie sur le partage pour debug" }
-        if ($advNoReboot)     { Write-Warn "PAS de reboot auto -- tu devras taper 'wpeutil reboot' manuellement" }
+        if ($advCopyUnattend) { Write-Warn "The generated unattend will be copied to the share for debugging" }
+        if ($advNoReboot)     { Write-Warn "NO auto reboot -- you must type 'wpeutil reboot' manually" }
         if ($advNoCopyDeploy) { Write-Warn "Copy-DeployToTarget DESACTIVE (diagnostic) -- phase 2 indisponible" }
         if ($advNoRunOnce)    { Write-Warn "Set-DeployRunOnce DESACTIVE (diagnostic) -- pas de manip ruche offline" }
     }
 
     # ?? ETAPE 5 : DRIVERS (selection AVANT le deploiement, pour ne pas attendre) ??
-    Write-Host ""; Write-Step "Etape 5/6 -- Drivers (optionnel)"
+    Write-Host ""; Write-Step "Step 5/6 -- Drivers (optional)"
     $driverModelPath = ''
     # Charger DriverManager si besoin
     if (-not (Get-Command Select-DriverModel -EA SilentlyContinue)) {
@@ -452,18 +452,18 @@ function Invoke-ScratchWizard {
         if (-not $drvRoot) { $drvRoot = "$NetworkShare\Drivers" }
         Write-Info "Partage drivers utilise : $drvRoot"
         if (Test-Path $drvRoot -EA SilentlyContinue) {
-            Write-Info "Selectionnez les drivers du modele a injecter (ou aucun)."
+            Write-Info "Select the model drivers to inject (or none)."
             $driverModelPath = Select-DriverModel -DriversRoot $drvRoot
             if ($driverModelPath) { Write-OK "Drivers selectionnes : $(Split-Path $driverModelPath -Leaf)" }
-            else { Write-Info "Aucun driver modele -- seuls les drivers inbox seront utilises." }
+            else { Write-Info "No model drivers -- only inbox drivers will be used." }
         } else {
             Write-Info "Partage drivers inaccessible ($drvRoot) -- etape ignoree."
         }
     } else {
-        Write-Info "Module DriverManager indisponible -- etape ignoree."
+        Write-Info "DriverManager module unavailable -- step skipped."
     }
 
-    Write-Host ""; Write-Step "Etape 6/6 -- Disque cible"
+    Write-Host ""; Write-Step "Step 6/6 -- Target disk"
     Show-DiskSummary | Out-Null
     $diskNum = Select-TargetDisk
 
@@ -493,7 +493,7 @@ function Invoke-ScratchWizard {
     Write-Host ""
     Write-Host "  [?]  CONFIRMER ? [o/N] : " -ForegroundColor Red -NoNewline
     if (-not ((Read-Host).Trim().ToLower() -in @('o','oui','y','yes'))) {
-        Write-Warn "Annule."
+        Write-Warn "Cancelled."
         exit 0
     }
 
@@ -516,7 +516,7 @@ function Invoke-ScratchWizard {
         # FormatDisk
         '        @{'
         "            Id      = 's01'"
-        "            Name    = 'Partitionner le disque'"
+        "            Name    = 'Partition the disk'"
         "            Type    = 'FormatDisk'"
         '            Enabled = $true'
         '            Params  = @{'
@@ -527,7 +527,7 @@ function Invoke-ScratchWizard {
         # ApplyWIM
         '        @{'
         "            Id      = 's02'"
-        "            Name    = 'Appliquer Windows'"
+        "            Name    = 'Apply Windows'"
         "            Type    = 'ApplyWIM'"
         '            Enabled = $true'
         '            Params  = @{'
@@ -605,7 +605,7 @@ function Invoke-ScratchWizard {
 
     # Reboot final (sauf si mode avance 'pas de reboot auto')
     if ($advNoReboot) {
-        Write-Warn "Step Reboot final NON genere -- tu devras taper 'wpeutil reboot' a la fin"
+        Write-Warn "Final Reboot step NOT generated -- you must type 'wpeutil reboot' at the end"
     } else {
         $pLines += "        @{ Id='s99'; Name='Redemarrage'; Type='Reboot'; Enabled=`$true; Params=@{ delaySeconds=10 } }"
     }
@@ -622,7 +622,7 @@ function Invoke-ScratchWizard {
     $useSimple = $true
 
     if ($useSimple) {
-        Write-OK "Phase 1 : deploiement SIMPLE (lineaire)"
+        Write-OK "Phase 1: SIMPLE deployment (linear)"
         # Importer le module SimpleDeploy
         # Resoudre le dossier Modules sans dependre d'une variable script (StrictMode).
         # En WinPE les scripts sont dans X:\Deploy\Scripts et les modules X:\Deploy\Modules.
@@ -686,7 +686,7 @@ function Invoke-ScratchWizard {
             if ($localPwd) {
                 $uParams.LocalAdminPassword = $localPwd
             } else {
-                Write-Warn "Cle 'localAdminPassword' introuvable dans le vault."
+                Write-Warn "Key 'localAdminPassword' not found in the vault."
                 Write-Warn "Le mot de passe par defaut du module sera utilise."
                 Write-Warn "Ajoute 'localAdminPassword = ...' dans secrets.vault."
             }
@@ -722,11 +722,11 @@ function Invoke-ScratchWizard {
         # du poste (by-name / by-mac / _default), PAS une sequence separee generee
         # ici. C'est plus simple et coherent : un seul fichier, un seul flux.
         if ($joinDomain -and $domainName) {
-            Write-Info "Jonction domaine demandee : ajoutez un step 'JoinDomain' en 1er"
-            Write-Info "dans votre sequence (by-name/by-mac/_default). Le domaine/OU sont"
+            Write-Info "Domain join requested: add a 'JoinDomain' step first"
+            Write-Info "in your sequence (by-name/by-mac/_default). The domain/OU are"
             Write-Info "lus depuis PSWinDeploy.psd1 (DomainName/DomainOU)."
         }
-        Write-Info "Sequence de phase 2 : resolue apres le reboot (par nom / MAC / _default / assistant)."
+        Write-Info "Phase 2 sequence: resolved after reboot (by name / MAC / _default / assistant)."
 
         # Config pour la phase 2 : on transmet le serveur + l'IP. Les chemins
         # detailles viennent de PSWinDeploy.psd1 (copie sur la cible).
@@ -763,7 +763,7 @@ function Invoke-ScratchWizard {
         # Trace : montrer ce qui sera transmis a la phase 2
         Write-Info "Config phase 2 : Share=$NetworkShare Fallback=$(if($NetworkShareFallback){$NetworkShareFallback}else{'(aucun)'})"
         if (-not $NetworkShareFallback) {
-            Write-Warn "Pas d'IP fallback : si le DNS ne resout pas en phase 2, l'acces au partage echouera."
+            Write-Warn "No IP fallback: if DNS does not resolve in phase 2, share access will fail."
         }
 
         # SUIVI P1 : signaler le demarrage du deploiement WinPE a l'API. Le
@@ -814,7 +814,7 @@ function Write-Banner {
     # Version lue dynamiquement depuis le fichier VERSION (source unique).
     # En WinPE/deploiement, le projet peut etre a divers emplacements : on teste
     # plusieurs chemins. Fallback sur la derniere version connue.
-    $v = '0.7.0'
+    $v = '0.8.0'
     foreach ($vf in @(
         (Join-Path $PSScriptRoot '..\VERSION'),
         (Join-Path $PSScriptRoot '..\..\VERSION'),
@@ -859,9 +859,9 @@ function Test-IsWinPE {
 function Initialize-Network {
     <#Lance wpeinit si WinPE et attend la connexion reseau#>
     if (Test-IsWinPE) {
-        Write-Info "WinPE detecte -- initialisation reseau (wpeinit)..."
+        Write-Info "WinPE detected -- network initialization (wpeinit)..."
         try { & wpeinit.exe 2>&1 | Out-Null; Start-Sleep 3 }
-        catch { Write-Warn "wpeinit non disponible" }
+        catch { Write-Warn "wpeinit unavailable" }
     }
 
     # Attente interface reseau active (max 30s)
@@ -880,7 +880,7 @@ function Initialize-Network {
         if (-not $nic) {
             $ipconfig = & ipconfig 2>&1 | Out-String
             if ($ipconfig -match 'IPv4.*: \d+\.\d+\.\d+\.\d+') {
-                Write-OK "Reseau actif (IPv4 detecte)"
+                Write-OK "Network active (IPv4 detected)"
                 return $true
             }
         }
@@ -936,30 +936,30 @@ function Select-SequenceFile {
     # ?? MENU ??????????????????????????????????????????????????????????????????
     Write-Host ""
     Write-Host "  +----------------------------------------------------------+" -ForegroundColor Cyan
-    Write-Host "  |             SELECTION DU DEPLOIEMENT                     |" -ForegroundColor Cyan
+    Write-Host "  |             DEPLOYMENT SELECTION                     |" -ForegroundColor Cyan
     Write-Host "  +----------------------------------------------------------+" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  [S] Deploiement  -- Assistant interactif (OS, disque, domaine)" -ForegroundColor Yellow
+    Write-Host "  [S] Deployment  -- Interactive assistant (OS, disk, domain)" -ForegroundColor Yellow
     Write-Host "       La post-installation (apps, MAJ, scripts) se fait en phase 2" -ForegroundColor DarkGray
-    Write-Host "       via les sequences (by-name / by-mac / _default) ou l'assistant." -ForegroundColor DarkGray
+    Write-Host "       via sequences (by-name / by-mac / _default) or the assistant." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [D] Charger des drivers (depuis un 2e ISO / cle USB)" -ForegroundColor Cyan
-    Write-Host "      Si WinPE ne voit pas le disque (ex: VirtIO/Proxmox), chargez" -ForegroundColor DarkGray
-    Write-Host "      les drivers du disque AVANT de deployer." -ForegroundColor DarkGray
+    Write-Host "  [D] Load drivers (from a 2nd ISO / USB key)" -ForegroundColor Cyan
+    Write-Host "      If WinPE does not see the disk (e.g. VirtIO/Proxmox), load" -ForegroundColor DarkGray
+    Write-Host "      the disk drivers BEFORE deploying." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [C] Ligne de commande (shell PowerShell, partages montes)" -ForegroundColor DarkGray
-    Write-Host "      Pour diagnostic, tests manuels, ou outils en ligne de commande" -ForegroundColor DarkGray
+    Write-Host "  [C] Command line (PowerShell shell, shares mounted)" -ForegroundColor DarkGray
+    Write-Host "      For diagnostics, manual tests, or command-line tools" -ForegroundColor DarkGray
     Write-Host ""
 
     # En mode SIMPLE, la phase 1 ne deroule PAS de sequence (les sequences sont
     # de la phase 2). On propose : deploiement [S], chargement drivers [D], shell [C].
     while ($true) {
-        Write-Host "  Choix [S=Deploiement / D=Drivers / C=Commande] : " -ForegroundColor Yellow -NoNewline
+        Write-Host "  Choice [S=Deployment / D=Drivers / C=Command]: " -ForegroundColor Yellow -NoNewline
         $sel = (Read-Host).Trim().ToUpper()
         if ($sel -eq 'S' -or $sel -eq '') { return 'SCRATCH' }
         if ($sel -eq 'D') { return 'LOADDRIVERS' }
         if ($sel -eq 'C') { return 'SHELL' }
-        Write-Warn "Choix invalide"
+        Write-Warn "Invalid choice"
     }
 }
 
@@ -1068,7 +1068,7 @@ try {
             try {
                 $built = Show-PostInstallWizard -SeqDir $seqShare -RuntimeDir 'C:\Deploy\Runtime' -ScriptShare $scriptShare -SoftwareShare $softwareShare -CatalogueShare $catalogueShare
 
-                # MODE ATTENTE WEB : le poste s'enregistre "en attente" et poll
+                # MODE ATTENTE WEB : le poste s'enregistre "waiting" et poll
                 # l'API jusqu'a recevoir une sequence poussee depuis l'interface.
                 # A reception, on l'ecrit en local et on bascule sur le flux
                 # normal (comme une sequence construite a la volee).
@@ -1080,12 +1080,12 @@ try {
                     $apiUrl  = if ($apiHost) { "http://${apiHost}:${apiPort}" } else { '' }
 
                     if (-not $apiUrl -or -not (Get-Command Register-DeployWaiting -EA SilentlyContinue)) {
-                        Write-Warn "Mode attente indisponible (API non configuree). Retour au menu."
+                        Write-Warn "Wait mode unavailable (API not configured). Returning to menu."
                         $built = $null
                     } else {
                         $mac = Get-DeployClientMac
                         Write-Info "En attente d'une sequence depuis l'interface web (MAC $mac)."
-                        Write-Info "Pousse une sequence depuis la page Suivi. Ctrl+C pour annuler."
+                        Write-Info "Push a sequence from the Monitoring page. Ctrl+C to cancel."
                         $pending = $null
                         while (-not $pending) {
                             Register-DeployWaiting -ApiUrl $apiUrl -ApiToken $apiTok -Mac $mac | Out-Null
@@ -1144,12 +1144,12 @@ try {
                     Remove-Item 'C:\Deploy\Runtime\state.psd1' -Force -EA SilentlyContinue
                     Write-Host ""
                     Write-Host "  ============================================" -ForegroundColor Green
-                    Write-OK "  Sequence terminee : les actions demandees ont ete realisees."
+                    Write-OK "  Sequence complete: the requested actions have been performed."
                     Write-Host "  ============================================" -ForegroundColor Green
                     Write-Host ""
                     # Pause explicite : l'operateur voit le resultat, appuie sur
                     # Entree, PUIS on revient au menu (pour nettoyer ou autre).
-                    Read-Host "  Appuyez sur Entree pour revenir au menu"
+                    Read-Host "  Press Enter to return to the menu"
                     Write-Host ""
                 } else {
                     $wizardDone = $true
@@ -1159,13 +1159,13 @@ try {
                 Write-Err "ERREUR dans l'assistant : $_"
                 Write-Err $_.ScriptStackTrace
                 Write-Host ""
-                $retry = Read-Host "  Une erreur est survenue. Revenir au menu ? (O/n)"
+                $retry = Read-Host "  An error occurred. Return to the menu? (Y/n)"
                 if ($retry -match '^[nN]') { $wizardDone = $true }
                 # sinon : on reboucle vers le menu
             }
         }
         Write-Host ""
-        Write-OK "Assistant termine."
+        Write-OK "Assistant finished."
         Write-Host "  Appuyez sur Entree pour fermer cette fenetre..." -ForegroundColor Yellow
         [void](Read-Host)
         exit 0
@@ -1182,7 +1182,7 @@ try {
     Write-Host ""
 
     # -- Import des modules locaux (dans le WIM) --
-    Write-Step "Chargement des modules..."
+    Write-Step "Loading modules..."
     foreach ($m in @('DeployReport','Hooks','WinPE-Builder','WIM-Manager','DiskSelector','DriverManager','TaskContract','TaskHandlers','TaskEngine','SequenceResolver','TaskSequence','NetShare','SimpleDeploy','PostInstall')) {
         try {
             Import-DeployModule $m
@@ -1192,12 +1192,12 @@ try {
             Write-Warn "Module $m non charge : $_"
         }
     }
-    Write-OK "Modules charges"
+    Write-OK "Modules loaded"
     Write-Host ""
 
     # -- Mode RESUME (apres reboot) : PHASE 2 --
     if ($Resume) {
-        Write-Step "Phase 2 : post-deploiement (Windows demarre)"
+        Write-Step "Phase 2: post-deployment (Windows started)"
         Write-Host ""
 
         # VERROU anti-double-instance par FICHIER (le mutex Global\ est refuse en
@@ -1220,7 +1220,7 @@ try {
             } catch { $takeLock = $true }
         }
         if (-not $takeLock) {
-            Write-Info "Une autre instance de reprise est deja active -- celle-ci se termine."
+            Write-Info "Another resume instance is already active -- this one exits."
             return
         }
         try { Set-Content -Path $lockFile -Value "$PID|$(Get-Date -Format 'o')" -Force -EA SilentlyContinue } catch {}
@@ -1234,13 +1234,13 @@ try {
                 $mk = Get-Content $markerFile -Raw -EA SilentlyContinue
                 $mkName = ($mk -split "`n" | Where-Object { $_ -match '^stepName=' }) -replace 'stepName=',''
                 Write-Warn "Reprise pendant un step : $($mkName.Trim())"
-                Write-Info "(Si ce step a plante, consultez C:\Deploy\Logs. Le deploiement reprend.)"
+                Write-Info "(If this step crashed, check C:\Deploy\Logs. The deployment resumes.)"
             } catch {}
         }
 
         # GARDE-FOU : fenetre de 5s pour reprendre la main. ESC = interrompre et
         # desarmer l'autologon (utile si le deploiement reboucle ou se bloque).
-        Write-Host "  Reprise du deploiement dans 5s..." -ForegroundColor Cyan
+        Write-Host "  Resuming deployment in 5s..." -ForegroundColor Cyan
         Write-Host "  [ESC] = interrompre et desactiver l'autologon / [Entree] = continuer maintenant" -ForegroundColor DarkGray
         $escPressed = $false
         $deadline = (Get-Date).AddSeconds(5)
@@ -1253,11 +1253,11 @@ try {
             Start-Sleep -Milliseconds 150
         }
         if ($escPressed) {
-            Write-Warn "Reprise interrompue par l'operateur."
+            Write-Warn "Resume interrupted by the operator."
             try { if (Get-Command Disable-DeployResume -EA SilentlyContinue) { Disable-DeployResume } } catch {}
             Write-Host ""
-            Write-OK "Autologon et reprise desactives."
-            Write-Info "Pour relancer l'assistant : C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard"
+            Write-OK "Autologon and resume disabled."
+            Write-Info "To re-run the assistant: C:\Deploy\Scripts\Start-Deploy.ps1 -PostInstallWizard"
             Write-Host ""
             $relance = Read-Host "  Lancer l'assistant maintenant ? (O/n)"
             if ($relance -notmatch '^[nN]') {
@@ -1279,15 +1279,15 @@ try {
 
         # Reconnecter les partages SMB (pour MAJ/apps/domaine). Le vault local
         # (C:\Deploy\secrets.vault) fournit les credentials via le mode 'Auto'.
-        Write-Step "Reconnexion des partages..."
+        Write-Step "Reconnecting shares..."
         try {
             $shareOk2 = Connect-DeployShares -Mode 'Auto' -VaultPath 'C:\Deploy\secrets.vault.psd1'
             if (-not $shareOk2) {
                 # Reessayer avec le vault sans extension
                 $shareOk2 = Connect-DeployShares -Mode 'Auto' -VaultPath 'C:\Deploy\secrets.vault'
             }
-            if ($shareOk2) { Write-OK "Partages reconnectes" }
-            else { Write-Warn "Partages non reconnectes (certains scripts peuvent echouer)" }
+            if ($shareOk2) { Write-OK "Shares reconnected" }
+            else { Write-Warn "Shares not reconnected (some scripts may fail)" }
         } catch {
             Write-Warn "Reconnexion partages : $_ (certains scripts peuvent echouer)"
         }
@@ -1317,7 +1317,7 @@ try {
 
         if (-not $SequencePath) {
             # Aucune sequence affectee -> assistant INTERACTIF (fenetre visible).
-            Write-Info "Aucune sequence affectee a ce poste."
+            Write-Info "No sequence assigned to this machine."
             Write-Info "Ouverture de l'assistant post-installation..."
             $selfPath = $PSCommandPath
             if (-not $selfPath) { $selfPath = 'C:\Deploy\Scripts\Start-Deploy.ps1' }
@@ -1353,7 +1353,7 @@ try {
             # LE MOTEUR : deroule la sequence, dispatche, gere reboot/reprise.
             $engResult = Invoke-Engine -SequencePath $SequencePath -Context $engineCtx -Resume -PhaseFilter 'Windows'
             # Si le moteur a reboote, le process s'arrete avant ici. S'il revient,
-            # c'est que la sequence est terminee (ou en attente d'action).
+            # c'est que la sequence est terminee (ou waiting d'action).
             if ($engResult -and $engResult.done) {
                 # Sequence terminee : basculer sur l'assistant pour permettre le
                 # nettoyage / la fin (qui desarmera le mode deploiement).
@@ -1386,18 +1386,18 @@ try {
 
         Write-Host ""
         Write-OK "==============================================="
-        Write-OK "  Phase 2 terminee"
+        Write-OK "  Phase 2 complete"
         Write-OK "==============================================="
         exit 0
     }
 
     # -- Initialisation reseau --------------------------------------------------
-    Write-Step "Initialisation reseau..."
+    Write-Step "Network initialization..."
     $netOk = Initialize-Network
     Write-Host ""
 
     if ($netOk) {
-        Write-Step "Connexion aux partages de deploiement..."
+        Write-Step "Connecting to deployment shares..."
 
         # Extraire le nom du serveur depuis NetworkShare (ex: \\SERVEUR\Deploy -> SERVEUR)
         $deployServer = ''
@@ -1411,7 +1411,7 @@ try {
             -VaultPwd $VaultPassword
 
         if (-not $shareOk) {
-            Write-Warn "Partages reseau inaccessibles -- deploiement depuis sources locales uniquement"
+            Write-Warn "Network shares inaccessible -- deploying from local sources only"
         }
         Write-Host ""
     }
@@ -1419,10 +1419,10 @@ try {
     # -- Selection de la sequence --
     if (-not $SequencePath -or -not (Test-Path $SequencePath)) {
         if ($Unattended) {
-            Write-Err "Mode -Unattended mais -SequencePath absent ou invalide"
+            Write-Err "-Unattended mode but -SequencePath missing or invalid"
             exit 1
         }
-        Write-Step "Selection de la sequence de deploiement..."
+        Write-Step "Selecting the deployment sequence..."
         $SequencePath = Select-SequenceFile -SearchRoot $NetworkShare
 
         # Option Charger des drivers : assistant qui charge les drivers d'un 2e
@@ -1445,33 +1445,33 @@ try {
             # compte (sinon l'init reseau faite au demarrage ignore les drivers
             # qu'on vient de charger). On propose de relancer l'init complete.
             if ($drvLoaded) {
-                Write-OK "Drivers charges."
-                Write-Host "  Pour exploiter les nouveaux drivers (reseau/stockage), il est" -ForegroundColor Yellow
-                Write-Host "  recommande de reinitialiser le reseau et les partages." -ForegroundColor Yellow
-                Write-Host "  [R] Reinitialiser reseau + partages (recommande)" -ForegroundColor Cyan
-                Write-Host "  [M] Revenir au menu sans reinitialiser" -ForegroundColor DarkGray
+                Write-OK "Drivers loaded."
+                Write-Host "  To use the new drivers (network/storage), it is" -ForegroundColor Yellow
+                Write-Host "  recommended to reset the network and shares." -ForegroundColor Yellow
+                Write-Host "  [R] Reset network + shares (recommended)" -ForegroundColor Cyan
+                Write-Host "  [M] Return to menu without resetting" -ForegroundColor DarkGray
                 Write-Host "  Choix [R/m] : " -ForegroundColor Yellow -NoNewline
                 $reinit = (Read-Host).Trim().ToUpper()
                 if ($reinit -ne 'M') {
-                    Write-Step "Reinitialisation reseau (prise en compte des nouveaux drivers)..."
+                    Write-Step "Network reset (applying new drivers)..."
                     $netOk = Initialize-Network
                     Write-Host ""
                     if ($netOk) {
-                        Write-Step "Reconnexion aux partages de deploiement..."
+                        Write-Step "Reconnecting to deployment shares..."
                         $deployServer = ''
                         if ($NetworkShare -match '\\\\([^\\]+)\\') { $deployServer = $Matches[1] }
                         $shareOk = Connect-DeployShares `
                             -Server $deployServer -Mode $CredentialMode `
                             -User $ShareUser -Pass $SharePassword -VaultPwd $VaultPassword
-                        if ($shareOk) { Write-OK "Partages reconnectes." }
-                        else { Write-Warn "Partages toujours inaccessibles." }
+                        if ($shareOk) { Write-OK "Shares reconnected." }
+                        else { Write-Warn "Shares still inaccessible." }
                     } else {
-                        Write-Warn "Reseau toujours indisponible apres reinitialisation."
+                        Write-Warn "Network still unavailable after reset."
                     }
                     Write-Host ""
                 }
             } else {
-                Read-Host "  Appuyez sur Entree pour revenir au menu"
+                Read-Host "  Press Enter to return to the menu"
             }
             $SequencePath = Select-SequenceFile -SearchRoot $NetworkShare
         }
@@ -1485,18 +1485,18 @@ try {
             Write-Host "  |  MODE LIGNE DE COMMANDE                                  |" -ForegroundColor Cyan
             Write-Host "  +----------------------------------------------------------+" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "  Les partages reseau sont montes et accessibles." -ForegroundColor Gray
+            Write-Host "  Network shares are mounted and accessible." -ForegroundColor Gray
             Write-Host "  Tu es dans un shell PowerShell interactif." -ForegroundColor Gray
             Write-Host ""
-            Write-Host "  - Pour revenir au menu de deploiement : tape  exit" -ForegroundColor DarkGray
-            Write-Host "  - Pour relancer le deploiement directement :" -ForegroundColor DarkGray
+            Write-Host "  - To return to the deployment menu: type  exit" -ForegroundColor DarkGray
+            Write-Host "  - To restart the deployment directly:" -ForegroundColor DarkGray
             Write-Host "      X:\Deploy\Scripts\Start-Deploy.ps1" -ForegroundColor DarkGray
-            Write-Host "  - Pour un invite de commandes classique : tape  cmd" -ForegroundColor DarkGray
+            Write-Host "  - For a classic command prompt: type  cmd" -ForegroundColor DarkGray
             Write-Host ""
             # Ouvrir un shell interactif. A la sortie (exit), on relance la selection.
             try { & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass } catch {}
             Write-Host ""
-            Write-Info "Retour au menu de deploiement..."
+            Write-Info "Returning to the deployment menu..."
             $SequencePath = Select-SequenceFile -SearchRoot $NetworkShare
         }
 
@@ -1508,7 +1508,7 @@ try {
             $wizardOutput = @(Invoke-ScratchWizard)
             # Mode SIMPLE : le deploiement a deja ete fait par Invoke-SimpleDeploy.
             if ($wizardOutput -contains 'SIMPLE-DONE') {
-                Write-OK "Deploiement simple termine."
+                Write-OK "Simple deployment complete."
                 return
             }
             # Prendre uniquement la derni?re valeur non-nulle (le chemin du fichier)
@@ -1523,7 +1523,7 @@ try {
 
     $SequencePath = $SequencePath.Trim().Trim('"').Trim("'")
     if ([string]::IsNullOrWhiteSpace($SequencePath)) {
-        throw "Aucune sequence selectionnee"
+        throw "No sequence selected"
     }
     if (-not (Test-Path $SequencePath -ErrorAction SilentlyContinue)) {
         # Essayer le chemin avec guillemets supprimes
@@ -1535,7 +1535,7 @@ try {
 
     # Lecture du JSON pour savoir si l'assistant disque est necessaire
     if ([string]::IsNullOrWhiteSpace($SequencePath)) {
-        throw "Chemin sequence vide -- impossible de continuer"
+        throw "Empty sequence path -- cannot continue"
     }
     # Lire la sequence -- PSD1 ou JSON
     $seqData = if ($SequencePath -match '\.psd1$') {
@@ -1551,7 +1551,7 @@ try {
     # -- Assistant pre-deploiement --
     if ($needDiskWizard -and $isWinPE) {
         Write-Host ""
-        Write-Step "Lancement de l'assistant de deploiement..."
+        Write-Step "Launching the deployment assistant..."
         $wizardResult = Invoke-PreDeployWizard -WimSearchPath @(
             "$NetworkShare\Images",
             'D:\Images',
@@ -1559,7 +1559,7 @@ try {
         )
 
         if (-not $wizardResult) {
-            Write-Warn "Deploiement annule par l'operateur."
+            Write-Warn "Deployment cancelled by the operator."
             exit 0
         }
 
@@ -1599,7 +1599,7 @@ try {
     # -- Fin --
     Write-Host ""
     Write-OK "==============================================="
-    Write-OK "  Deploiement termine avec succes !"
+    Write-OK "  Deployment completed successfully!"
     Write-OK "==============================================="
 
     # Exporter les logs vers le partage AVANT de rebooter (survivent au reboot/BSOD)
@@ -1611,7 +1611,7 @@ try {
     # peut rebooter avant le flush disque -> corruption -> BSOD sans logs).
     $inWinPE = Test-Path 'X:\Windows\System32\wpeutil.exe' -EA SilentlyContinue
     if ($inWinPE) {
-        Write-OK "  Flush disque puis redemarrage (wpeutil)..."
+        Write-OK "  Flushing disk then rebooting (wpeutil)..."
         foreach ($vol in @('S','W','R')) {
             if (Test-Path "${vol}:\" -EA SilentlyContinue) {
                 try { [System.IO.File]::WriteAllText("${vol}:\.flush", '1'); Remove-Item "${vol}:\.flush" -Force -EA SilentlyContinue } catch {}
@@ -1621,7 +1621,7 @@ try {
         & wpeutil.exe reboot
         Start-Sleep 30
     } else {
-        Write-OK "  La machine va redemarrer dans 10 secondes..."
+        Write-OK "  The machine will reboot in 10 seconds..."
         Start-Sleep 10
         Restart-Computer -Force
     }
@@ -1632,7 +1632,7 @@ try {
     Write-Err "  ERREUR FATALE : $_"
     Write-Err "==============================================="
     Write-Host ""
-    Write-Warn "  Le deploiement a echoue."
+    Write-Warn "  The deployment failed."
     Write-Warn "  Consultez les logs : $DeployRoot\Logs\deploy.log"
     Write-Host ""
     Write-Host "  Appuyez sur une touche pour ouvrir une console de depannage..." -ForegroundColor DarkGray

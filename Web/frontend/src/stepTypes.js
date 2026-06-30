@@ -4,99 +4,99 @@
 
 export const STEP_TYPES = {
   InstallApps: {
-    label: "Installer des applications",
-    desc: "Installe une liste d'apps du catalogue (winget / choco / exe / script).",
+    label: "Install applications",
+    desc: "Installs a list of catalogue apps (winget / choco / exe / script).",
     fields: [
-      { key: "apps", label: "Applications (noms du catalogue)", type: "appList" },
+      { key: "apps", label: "Applications (catalogue names)", type: "appList" },
     ],
   },
   RunScript: {
-    label: "Executer un script",
-    desc: "Lance un script PowerShell du partage Scripts. exit 3010 = reboot.",
+    label: "Run a script",
+    desc: "Runs a PowerShell script from the Scripts share. exit 3010 = reboot.",
     fields: [
-      { key: "path", label: "Script (.ps1 du partage)", type: "scriptPick" },
-      { key: "args", label: "Arguments", type: "text", placeholder: "-Param valeur" },
+      { key: "path", label: "Script (.ps1 from the share)", type: "scriptPick" },
+      { key: "args", label: "Arguments", type: "text", placeholder: "-Param value" },
     ],
   },
   InstallUpdates: {
     label: "Windows Update",
-    desc: "Installe les mises a jour Windows (plusieurs passes possibles).",
+    desc: "Installs Windows updates (multiple passes possible).",
     fields: [
-      { key: "maxPasses", label: "Passes maximum", type: "number", default: 3 },
+      { key: "maxPasses", label: "Maximum passes", type: "number", default: 3 },
     ],
   },
   JoinDomain: {
-    label: "Joindre le domaine",
-    desc: "Jonction au domaine Active Directory (idempotent).",
+    label: "Join the domain",
+    desc: "Joins the Active Directory domain (idempotent).",
     fields: [
-      { key: "domain", label: "Domaine", type: "text" },
-      { key: "ou", label: "Unite d'organisation (OU)", type: "text", placeholder: "OU=Postes,DC=..." },
-      { key: "newName", label: "Nouveau nom de machine", type: "text" },
+      { key: "domain", label: "Domain", type: "text" },
+      { key: "ou", label: "Organizational unit (OU)", type: "text", placeholder: "OU=Postes,DC=..." },
+      { key: "newName", label: "New machine name", type: "text" },
     ],
   },
   SetComputerName: {
-    label: "Renommer la machine",
-    desc: "Definit le nom de l'ordinateur.",
+    label: "Rename the machine",
+    desc: "Sets the computer name.",
     fields: [
-      { key: "name", label: "Nom de la machine", type: "text" },
+      { key: "name", label: "Machine name", type: "text" },
     ],
   },
   InjectDrivers: {
-    label: "Injecter des drivers",
-    desc: "Injecte les drivers d'un modele (online).",
+    label: "Inject drivers",
+    desc: "Injects a model's drivers (online).",
     fields: [
-      { key: "model", label: "Modele de drivers", type: "driverPick" },
+      { key: "model", label: "Driver model", type: "driverPick" },
     ],
   },
   CopyFiles: {
-    label: "Copier des fichiers",
-    desc: "Copie un fichier ou dossier vers une destination.",
+    label: "Copy files",
+    desc: "Copies a file or folder to a destination.",
     fields: [
       { key: "source", label: "Source", type: "text" },
       { key: "dest", label: "Destination", type: "text" },
     ],
   },
   SetRegistry: {
-    label: "Cle de registre",
-    desc: "Definit une valeur de registre.",
+    label: "Registry key",
+    desc: "Sets a registry value.",
     fields: [
       { key: "key", label: "Cle", type: "text", placeholder: "HKLM:\\SOFTWARE\\..." },
-      { key: "name", label: "Nom de la valeur", type: "text" },
-      { key: "value", label: "Valeur", type: "text" },
+      { key: "name", label: "Value name", type: "text" },
+      { key: "value", label: "Value", type: "text" },
       { key: "type", label: "Type", type: "select", options: ["String", "DWord", "QWord", "Binary", "MultiString", "ExpandString"] },
     ],
   },
   SetLocale: {
-    label: "Langue & fuseau",
-    desc: "Configure la langue, le clavier et le fuseau horaire.",
+    label: "Language & time zone",
+    desc: "Sets the language, keyboard and time zone.",
     fields: [
       { key: "locale", label: "Locale", type: "text", placeholder: "fr-FR" },
-      { key: "timezone", label: "Fuseau horaire", type: "text", placeholder: "Romance Standard Time" },
+      { key: "timezone", label: "Time zone", type: "text", placeholder: "Romance Standard Time" },
     ],
   },
   WaitForNetwork: {
-    label: "Attendre le reseau",
-    desc: "Attend que le reseau soit disponible.",
+    label: "Wait for network",
+    desc: "Waits for the network to be available.",
     fields: [
-      { key: "timeoutSec", label: "Delai max (secondes)", type: "number", default: 120 },
-      { key: "target", label: "Cible a tester (host)", type: "text", placeholder: "10.0.8.111" },
+      { key: "timeoutSec", label: "Max timeout (seconds)", type: "number", default: 120 },
+      { key: "target", label: "Target to test (host)", type: "text", placeholder: "10.0.8.111" },
     ],
   },
   Reboot: {
-    label: "Redemarrer",
-    desc: "Redemarre la machine et reprend a l'etape suivante.",
+    label: "Reboot",
+    desc: "Reboots the machine and resumes at the next step.",
     fields: [],
   },
   Cleanup: {
-    label: "Nettoyage final",
-    desc: "Retire l'autologon, les fichiers temporaires, etc.",
+    label: "Final cleanup",
+    desc: "Removes autologon, temporary files, etc.",
     fields: [
-      { key: "keepLogs", label: "Conserver les logs", type: "checkbox", default: true },
+      { key: "keepLogs", label: "Keep the logs", type: "checkbox", default: true },
     ],
   },
   ShowWizard: {
     label: "Assistant post-installation",
-    desc: "Affiche l'assistant interactif sur le poste.",
+    desc: "Shows the interactive assistant on the machine.",
     fields: [],
   },
 }

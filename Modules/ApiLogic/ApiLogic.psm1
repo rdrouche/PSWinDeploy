@@ -535,7 +535,16 @@ function Get-DeployCompleted {
         # Debut du dernier cycle : on remonte depuis $cycleEnd et on s'arrete au
         # premier des deux signaux rencontres : un 'done' anterieur (fin du cycle
         # precedent) OU un saut temporel > seuil (nouveau deploiement).
-        $GAP_SECONDS = 3600   # 1h de trou entre heartbeats = nouveau deploiement
+        #
+        # ATTENTION au choix du seuil : un deploiement NORMAL contient un grand
+        # trou entre la phase 1 (WinPE applique le WIM) et la phase 2 (Windows
+        # demarre) -- reboot + installation + OOBE peuvent depasser 1h sur une
+        # grosse image ou une machine lente. Il ne faut donc PAS couper la sur ce
+        # trou (sinon on ne mesure que la phase 2 -> duree ridicule, voire 0s).
+        # Un VRAI redeploiement (meme MAC reinstallee) est separe de plusieurs
+        # heures/jours. On fixe le seuil tres haut (12h) pour distinguer les deux
+        # sans jamais tronconner un deploiement en cours.
+        $GAP_SECONDS = 43200   # 12h : au-dela = nouveau deploiement (VM redeployee)
         $cycleStart = 0
         for ($k = $cycleEnd; $k -gt 0; $k--) {
             # Coupure si l'evenement precedent est un 'done' (cycle d'avant).

@@ -1,10 +1,10 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    DeployQueue.psm1 -- File d'attente de sequences par poste (mode "en attente").
+    DeployQueue.psm1 -- File d'attente de sequences par poste (mode "waiting").
 .DESCRIPTION
     Responsabilite UNIQUE : gerer, cote API, la file d'attente du mode pull
-    interactif. Un poste en phase 2 peut s'annoncer "en attente" ; un operateur
+    interactif. Un poste en phase 2 peut s'annoncer "waiting" ; un operateur
     lui pousse alors une sequence depuis l'interface web ; le poste la recupere
     et la joue.
 
@@ -48,7 +48,7 @@ function Test-QueueReady {
 }
 
 function Register-WaitingDeployment {
-    <# .SYNOPSIS Un poste s'annonce "en attente" d'une sequence. Idempotent :
+    <# .SYNOPSIS Un poste s'annonce "waiting" d'une sequence. Idempotent :
         re-enregistrer met juste a jour 'lastSeen'. #>
     param(
         [Parameter(Mandatory)][string]$Id,

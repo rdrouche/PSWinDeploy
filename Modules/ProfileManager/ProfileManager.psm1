@@ -55,7 +55,7 @@ function Get-DeployProfile {
     }
 
     if ($found.Count -eq 0) {
-        Write-PLog "Aucun profil trouve dans les chemins configures" -Level WARN
+        Write-PLog "No profile found in the configured paths" -Level WARN
         return @()
     }
 
@@ -254,7 +254,7 @@ function Get-DeployCatalogue {
             return Get-Content $path -Raw | ConvertFrom-Json
         }
     }
-    Write-PLog "Catalogue introuvable -- retourne liste vide" -Level WARN
+    Write-PLog "Catalogue not found -- returning empty list" -Level WARN
     return @()
 }
 
@@ -366,7 +366,7 @@ function Set-AutoLogonOffline {
         if ($LASTEXITCODE -ne 0) {
             Write-PLog "ATTENTION : demontage ruche echoue ! $result" -Level WARN
         } else {
-            Write-PLog "Ruche demontee proprement" -Level INFO
+            Write-PLog "Hive unmounted cleanly" -Level INFO
         }
     }
 }
@@ -702,13 +702,13 @@ function Invoke-DeployCleanup {
     [CmdletBinding()]
     param([switch]$KeepLogs)
 
-    Write-PLog "=== Nettoyage post-deploiement ===" -Level STEP
+    Write-PLog "=== Post-deployment cleanup ===" -Level STEP
 
     # Suppression autologon
-    try { Remove-AutoLogon } catch { Write-PLog "Autologon deja absent" -Level INFO }
+    try { Remove-AutoLogon } catch { Write-PLog "Autologon already absent" -Level INFO }
 
     # Suppression compte temporaire
-    try { Remove-DeployTempUser } catch { Write-PLog "Compte deploy deja absent" -Level INFO }
+    try { Remove-DeployTempUser } catch { Write-PLog "deploy account already absent" -Level INFO }
 
     # Suppression RunOnce
     try {
@@ -733,7 +733,7 @@ function Invoke-DeployCleanup {
         Write-PLog "Logs conserves dans C:\Deploy\Logs" -Level INFO
     }
 
-    Write-PLog "Nettoyage termine -- machine prete" -Level SUCCESS
+    Write-PLog "Cleanup complete -- machine ready" -Level SUCCESS
 }
 
 # -----------------------------------------------------------------------------
@@ -749,7 +749,7 @@ function Invoke-ProfileSelector {
     param([string]$ProfilesPath)
 
     $profiles = Get-DeployProfile -ProfilesPath:$(if ($ProfilesPath) { $ProfilesPath } else { $script:ProfilesRoot })
-    if ($profiles.Count -eq 0) { throw "Aucun profil disponible" }
+    if ($profiles.Count -eq 0) { throw "No profile available" }
 
     Clear-Host
     Write-Host ""

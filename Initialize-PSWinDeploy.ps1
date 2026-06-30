@@ -81,7 +81,7 @@ function Read-Answer {
     if ([string]::IsNullOrWhiteSpace($answer)) {
         if ($Default)   { return $Default }
         if ($Required)  {
-            Write-Warn "Cette valeur est obligatoire."
+            Write-Warn "This value is required."
             return Read-Answer @PSBoundParameters
         }
         return ''
@@ -90,7 +90,7 @@ function Read-Answer {
     if ($Options) {
         $match = $Options | Where-Object { $_.ToLower() -eq $answer.Trim().ToLower() } | Select-Object -First 1
         if (-not $match) {
-            Write-Warn "Valeur invalide. Choisir parmi : $($Options -join ', ')"
+            Write-Warn "Invalid value. Choose from: $($Options -join ', ')"
             return Read-Answer @PSBoundParameters
         }
         return $match
@@ -115,8 +115,8 @@ function Read-Password {
     $pw2 = $null
     do {
         $pw1 = Read-Answer -Question $Question -Password -Required
-        $pw2 = Read-Answer -Question "Confirmer" -Password -Required
-        if ($pw1 -ne $pw2) { Write-Warn "Les mots de passe ne correspondent pas." }
+        $pw2 = Read-Answer -Question "Confirm" -Password -Required
+        if ($pw1 -ne $pw2) { Write-Warn "Passwords do not match." }
     } while ($pw1 -ne $pw2)
     return $pw1
 }
@@ -128,25 +128,25 @@ function Read-Password {
 Clear-Host
 Write-Host ""
 Write-Host "  ==========================================================" -ForegroundColor Cyan
-Write-Host "              PSWinDeploy  --  Initialisation               " -ForegroundColor Cyan
-Write-Host "         Remplacement MDT en PowerShell moderne  v0.7.0     " -ForegroundColor Cyan
+Write-Host "                PSWinDeploy  --  Setup                     " -ForegroundColor Cyan
+Write-Host "         A modern MDT replacement in PowerShell  v0.8.0    " -ForegroundColor Cyan
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Ce script va :" -ForegroundColor White
-Write-Host "    1. Choisir le dossier d'installation" -ForegroundColor Gray
-Write-Host "    2. Creer la structure de dossiers et les partages SMB" -ForegroundColor Gray
-Write-Host "    3. Generer le fichier de configuration PSWinDeploy.psd1" -ForegroundColor Gray
-Write-Host "    4. Creer le vault de secrets (mots de passe chiffres)" -ForegroundColor Gray
-Write-Host "    5. Verifier les prerequis (ADK, Pode)" -ForegroundColor Gray
-Write-Host "    6. Generer les scripts Start-API.ps1 et Build-WinPE.ps1" -ForegroundColor Gray
+Write-Host "  This script will:" -ForegroundColor White
+Write-Host "    1. Choose the installation folder" -ForegroundColor Gray
+Write-Host "    2. Create the folder structure and SMB shares" -ForegroundColor Gray
+Write-Host "    3. Generate the PSWinDeploy.psd1 configuration file" -ForegroundColor Gray
+Write-Host "    4. Create the secrets vault (encrypted passwords)" -ForegroundColor Gray
+Write-Host "    5. Check prerequisites (ADK, Pode)" -ForegroundColor Gray
+Write-Host "    6. Generate Start-API.ps1 and Build-WinPE.ps1" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Note : Le compte de jonction domaine (svc-joindomain) est utilise" -ForegroundColor DarkGray
-Write-Host "  UNIQUEMENT par la machine cible pendant le step JoinDomain." -ForegroundColor DarkGray
-Write-Host "  Le serveur PSWinDeploy n'a lui-meme pas besoin de rejoindre un domaine." -ForegroundColor DarkGray
+Write-Host "  Note: the domain-join account (svc-joindomain) is used" -ForegroundColor DarkGray
+Write-Host "  ONLY by the target machine during the JoinDomain step." -ForegroundColor DarkGray
+Write-Host "  The PSWinDeploy server itself does not need to join a domain." -ForegroundColor DarkGray
 Write-Host ""
 
 if (-not $Silent) {
-    Write-Host "  [?]  Appuyez sur Entree pour commencer..." -ForegroundColor White -NoNewline
+    Write-Host "  [?]  Press Enter to start..." -ForegroundColor White -NoNewline
     Read-Host | Out-Null
 }
 
@@ -154,34 +154,37 @@ if (-not $Silent) {
 # ETAPE 1 -- CHEMIN D'INSTALLATION
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 1 -- Chemin d'installation"
+# ---------------------------------------------------------------------------
+# STEP 1 -- INSTALLATION PATH
+# ---------------------------------------------------------------------------
 
-Write-Info "Contient les modules, partages, ISO WinPE et la configuration."
+Write-Header "Step 1 -- Installation path"
+Write-Info "Contains modules, shares, WinPE ISO and configuration."
 Write-Host ""
 
 if (-not $InstallPath) {
-    Write-Info "Disques disponibles :"
+    Write-Info "Available drives:"
     Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 } |
         ForEach-Object {
             $freeGB = if ($_.Free) { [Math]::Round($_.Free / 1GB, 1) } else { '?' }
-            Write-Host ("    {0}:\  {1} GB libres" -f $_.Name, $freeGB) -ForegroundColor Gray
+            Write-Host ("    {0}:\  {1} GB free" -f $_.Name, $freeGB) -ForegroundColor Gray
         }
     Write-Host ""
-    $InstallPath = Read-Answer -Question "Dossier d'installation" -Default 'C:\PSWinDeploy' -Required
+    $InstallPath = Read-Answer -Question "Installation folder" -Default 'C:\PSWinDeploy' -Required
 }
 
 $InstallPath = $InstallPath.TrimEnd('\')
-Write-Info "Chemin selectionne : $InstallPath"
+Write-Info "Selected path: $InstallPath"
 
 $driveLetter = Split-Path $InstallPath -Qualifier
 $driveObj    = Get-PSDrive -Name $driveLetter.TrimEnd(':') -ErrorAction SilentlyContinue
 if ($driveObj -and $driveObj.Free) {
     $freeGB = [Math]::Round($driveObj.Free / 1GB, 1)
     if ($driveObj.Free -lt 20GB) {
-        Write-Warn "Espace libre : $freeGB GB (minimum recommande : 20 GB)"
-        if (-not (Read-YesNo "Continuer quand meme ?" $false)) { exit 1 }
+        Write-Warn "Free space: $freeGB GB (recommended minimum: 20 GB)"
+        if (-not (Read-YesNo "Continue anyway?" $false)) { exit 1 }
     } else {
-        Write-OK "Espace libre : $freeGB GB"
+        Write-OK "Free space: $freeGB GB"
     }
 }
 
@@ -189,18 +192,18 @@ if ($driveObj -and $driveObj.Free) {
 # ETAPE 2 -- RESEAU
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 2 -- Configuration reseau"
+Write-Header "Step 2 -- Network configuration"
 
 # Detection automatique du NOM et de l'IP du serveur. L'utilisateur confirme
 # (defaut = valeur detectee) ou saisit manuellement. Les deux servent a generer
 # les partages au format @{ DNS; IP } -- robuste dans ET hors domaine.
 $serverName = $env:COMPUTERNAME
-Write-Info "Nom de ce serveur detecte : $serverName"
-$serverFQDN = Read-Answer -Question "Nom DNS du serveur (pour les partages)" -Default $serverName
+Write-Info "Detected server name: $serverName"
+$serverFQDN = Read-Answer -Question "Server DNS name (for the shares)" -Default $serverName
 if ([string]::IsNullOrWhiteSpace($serverFQDN)) {
     $serverFQDN = $env:COMPUTERNAME
     if ([string]::IsNullOrWhiteSpace($serverFQDN)) {
-        $serverFQDN = Read-Answer -Question "Nom du serveur (obligatoire)" -Required
+        $serverFQDN = Read-Answer -Question "Server name (required)" -Required
     }
 }
 
@@ -218,98 +221,98 @@ if (-not $detectedIp) {
             Select-Object -First 1).IPAddressToString
     } catch {}
 }
-if ($detectedIp) { Write-Info "Adresse IP detectee : $detectedIp" }
-$serverIP = Read-Answer -Question "Adresse IP du serveur (fallback hors domaine)" -Default $detectedIp
+if ($detectedIp) { Write-Info "Detected IP address: $detectedIp" }
+$serverIP = Read-Answer -Question "Server IP address (fallback outside domain)" -Default $detectedIp
 if ([string]::IsNullOrWhiteSpace($serverIP)) {
-    Write-Warn "Pas d'IP fournie -- le fallback IP ne sera pas disponible (risque hors domaine)."
+    Write-Warn "No IP provided -- IP fallback won't be available (risk outside domain)."
     $serverIP = $serverFQDN  # repli : utiliser le nom partout
 }
 Write-Info "Serveur : nom='$serverFQDN' IP='$serverIP'"
 
 Write-Host ""
-Write-Info "Partages SMB qui seront crees :"
+Write-Info "SMB shares that will be created:"
 foreach ($s in @('Images','Deploy','Drivers','Logiciels','Scripts','Logs')) {
     Write-Host ("    \\{0}\{1}  -->  {2}\Shares\{1}" -f $serverFQDN, $s, $InstallPath) -ForegroundColor Gray
 }
 Write-Host ""
-$createShares = -not $SkipShares -and (Read-YesNo "Creer les partages SMB sur ce serveur ?" $true)
+$createShares = -not $SkipShares -and (Read-YesNo "Create the SMB shares on this server?" $true)
 
 # ---------------------------------------------------------------------------
 # ETAPE 3 -- COMPTE RESEAU WINPE (svc-winpe)
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 3 -- Compte reseau WinPE"
+Write-Header "Step 3 -- WinPE network account"
 
-Write-Info "Ce compte permet a WinPE d'acceder aux partages de deploiement."
-Write-Info "Droits : lecture seule sur Images/Deploy/Drivers, ecriture sur Logs."
-Write-Info "Ce compte n'a AUCUN acces aux machines deployees."
+Write-Info "This account lets WinPE access the deployment shares."
+Write-Info "Rights: read-only on Images/Deploy/Drivers, write on Logs."
+Write-Info "This account has NO access to deployed machines."
 Write-Host ""
 
-$winpeUserMode = Read-Answer -Question "Type de compte" -Options @('local','domaine') -Default 'local'
+$winpeUserMode = Read-Answer -Question "Account type" -Options @('local','domaine') -Default 'local'
 
 if ($winpeUserMode -eq 'local') {
-    $winpeUser     = Read-Answer -Question "Nom du compte local" -Default 'svc-winpe'
+    $winpeUser     = Read-Answer -Question "Local account name" -Default 'svc-winpe'
     $winpeUserFull = "$serverName\$winpeUser"
 } else {
-    $wpeDomain     = Read-Answer -Question "Nom du domaine" -Required
-    $winpeUser     = Read-Answer -Question "Nom du compte" -Default 'svc-winpe'
+    $wpeDomain     = Read-Answer -Question "Domain name" -Required
+    $winpeUser     = Read-Answer -Question "Account name" -Default 'svc-winpe'
     $winpeUserFull = "$wpeDomain\$winpeUser"
 }
 
 if ($winpeUserMode -eq 'local') {
-    # Compte local : choix entre mot de passe aleatoire ou saisie manuelle.
-    $winpePasswordMode = Read-Answer -Question "[R] Aleatoire ou [S] Saisie du mot de passe" -Options @('R','S') -Default 'R'
+    # Account local : choix entre mot de passe aleatoire ou saisie manuelle.
+    $winpePasswordMode = Read-Answer -Question "[R] Random or [S] Enter the password" -Options @('R','S') -Default 'R'
     if ($winpePasswordMode -eq 'R') {
         $winpePassword = New-RandomString
     } else {
-        $winpePassword = Read-Password -Question "Mot de passe pour $winpeUserFull"
+        $winpePassword = Read-Password -Question "Password for $winpeUserFull"
     }
 } else {
-    # Compte de domaine : saisie obligatoire (le compte existe deja dans l'AD).
-    $winpePassword = Read-Password -Question "Mot de passe pour $winpeUserFull"
+    # Account de domaine : saisie obligatoire (le compte existe deja dans l'AD).
+    $winpePassword = Read-Password -Question "Password for $winpeUserFull"
 }
 
 # ---------------------------------------------------------------------------
 # ETAPE 4 -- JONCTION DOMAINE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 4 -- Jonction domaine Active Directory"
+Write-Header "Step 4 -- Active Directory domain join"
 
-Write-Info "Le compte de jonction est utilise par la MACHINE DEPLOYEE (pas le serveur)"
-Write-Info "lors du step JoinDomain pour s'enregistrer dans l'AD."
+Write-Info "The join account is used by the DEPLOYED MACHINE (not the server)"
+Write-Info "during the JoinDomain step to register in AD."
 Write-Host ""
 
-$joinDomain     = Read-YesNo "Les machines deployees rejoignent-elles un domaine AD ?" $true
+$joinDomain     = Read-YesNo "Do deployed machines join an AD domain?" $true
 $domainName     = ''
 $domainJoinUser = ''
 $domainJoinPass = ''
 $defaultOU      = ''
 
 if ($joinDomain) {
-    $domainName     = Read-Answer -Question "Nom du domaine (ex: corp.local)" -Required
-    $domainJoinUser = Read-Answer -Question "Compte de jonction (ex: svc-joindomain)" -Default 'svc-joindomain'
-    Write-Info "Ce compte doit avoir le droit 'Add workstations to domain' sur l'OU cible."
-    $domainJoinPass = Read-Password -Question "Mot de passe de $domainJoinUser"
-    $defaultOU      = Read-Answer -Question "OU par defaut (laisser vide si non applicable)" -Default ''
+    $domainName     = Read-Answer -Question "Domain name (ex: corp.local)" -Required
+    $domainJoinUser = Read-Answer -Question "Join account (e.g. svc-joindomain)" -Default 'svc-joindomain'
+    Write-Info "This account needs 'Add workstations to domain' on the target OU."
+    $domainJoinPass = Read-Password -Question "Password for $domainJoinUser"
+    $defaultOU      = Read-Answer -Question "Default OU (leave empty if not applicable)" -Default ''
 }
 
 # ---------------------------------------------------------------------------
 # ETAPE 5 -- MOTS DE PASSE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 5 -- Mots de passe de deploiement"
+Write-Header "Step 5 -- Deployment passwords"
 
-Write-Info "Ces mots de passe sont chiffres dans le vault, jamais en clair."
+Write-Info "These passwords are encrypted in the vault, never in cleartext."
 Write-Host ""
 
-Write-Info "Mot de passe du compte Administrateur local (builtin) des machines :"
-Write-Info "Ce compte existe deja dans Windows -- on definit juste son mot de passe."
-Write-Info "Il sert a l'autologon de la phase 2 et reste l'admin de la machine."
-$localAdminPassMode = Read-Answer -Question "[R] Aleatoire ou [S] Saisie du mot de passe" -Options @('R','S') -Default 'R'
+Write-Info "Password for the machines' built-in local Administrator account:"
+Write-Info "This account already exists in Windows -- we just set its password."
+Write-Info "It is used for phase 2 autologon and remains the machine admin."
+$localAdminPassMode = Read-Answer -Question "[R] Random or [S] Enter the password" -Options @('R','S') -Default 'R'
 if ($localAdminPassMode -eq 'R') {
     $localAdminPass = New-RandomString
 } else {
-    $localAdminPass = Read-Password -Question "Mot de passe Administrateur local"
+    $localAdminPass = Read-Password -Question "Local Administrator password"
 }
 
 # NB : la jonction de domaine (compte + mot de passe) a DEJA ete demandee a
@@ -317,51 +320,51 @@ if ($localAdminPassMode -eq 'R') {
 # variables de l'etape 4).
 
 Write-Host ""
-$vaultMode = Read-Answer -Question "Mode de chiffrement du vault" -Options @('AES','Plain') -Default 'Plain'
+$vaultMode = Read-Answer -Question "Vault encryption mode" -Options @('AES','Plain') -Default 'Plain'
 
 $vaultPassword = ''
 if ($vaultMode -eq 'AES') {
-    Write-Info "Le mot de passe AES protege le vault. Requis au boot WinPE."
-    Write-Info "Peut aussi etre passe via la variable d'env PSWINDEX_VAULT_PASSWORD."
-    $vaultPassword = Read-Password -Question "Mot de passe vault AES"
+    Write-Info "The AES password protects the vault. Required at WinPE boot."
+    Write-Info "Can also be passed via the PSWINDEX_VAULT_PASSWORD env variable."
+    $vaultPassword = Read-Password -Question "AES vault password"
 } else {
-    Write-Warn "Mode Plain : vault en clair, protege par droits reseau et acces physique."
+    Write-Warn "Plain mode: vault in cleartext, protected by network rights and physical access."
 }
 
 # ---------------------------------------------------------------------------
 # ETAPE 6 -- WINPE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 6 -- Configuration WinPE"
+Write-Header "Step 6 -- WinPE configuration"
 
-Write-Info "Note : x86 retire depuis ADK 2004. Architectures supportees : amd64, arm64."
+Write-Info "Note: x86 removed since ADK 2004. Supported architectures: amd64, arm64."
 Write-Host ""
 $arch     = Read-Answer -Question "Architecture" -Options @('amd64','arm64') -Default 'amd64'
 $locale   = Read-Answer -Question "Locale" -Default 'fr-FR'
-$timezone = Read-Answer -Question "Fuseau horaire" -Default 'Romance Standard Time'
-$firmware = Read-Answer -Question "Firmware par defaut" -Options @('UEFI','BIOS') -Default 'UEFI'
+$timezone = Read-Answer -Question "Time zone" -Default 'Romance Standard Time'
+$firmware = Read-Answer -Question "Default firmware" -Options @('UEFI','BIOS') -Default 'UEFI'
 
 # ---------------------------------------------------------------------------
 # ETAPE 7 -- NOTIFICATIONS
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 7 -- Notifications (optionnel)"
+Write-Header "Step 7 -- Notifications (optional)"
 
-$configNotif  = Read-YesNo "Configurer les notifications (email / Teams) ?" $false
+$configNotif  = Read-YesNo "Configure notifications (email / Teams)?" $false
 $smtpServer   = ''
 $smtpFrom     = ''
 $smtpTo       = ''
 $teamsWebhook = ''
 
 if ($configNotif) {
-    if (Read-YesNo "  Notifications par email ?" $true) {
-        $smtpServer = Read-Answer -Question "  Serveur SMTP" -Required
-        $smtpFrom   = Read-Answer -Question "  Expediteur" -Default "pswindex@$domainName"
-        $smtpTo     = Read-Answer -Question "  Destinataire(s) (virgules)" -Required
+    if (Read-YesNo "  Email notifications?" $true) {
+        $smtpServer = Read-Answer -Question "  SMTP server" -Required
+        $smtpFrom   = Read-Answer -Question "  Sender" -Default "pswindex@$domainName"
+        $smtpTo     = Read-Answer -Question "  Recipient(s) (comma-separated)" -Required
     }
-    if (Read-YesNo "  Notifications Teams ?" $false) {
-        Write-Info "  Canal Teams --> ... --> Connecteurs --> Incoming Webhook"
-        $teamsWebhook = Read-Answer -Question "  URL webhook Teams" -Required
+    if (Read-YesNo "  Teams notifications?" $false) {
+        Write-Info "  Teams channel --> ... --> Connectors --> Incoming Webhook"
+        $teamsWebhook = Read-Answer -Question "  Teams webhook URL" -Required
     }
 }
 
@@ -369,15 +372,15 @@ if ($configNotif) {
 # RECAPITULATIF
 # ---------------------------------------------------------------------------
 
-Write-Header "Recapitulatif"
+Write-Header "Summary"
 Write-Host "  Dossier installation   : $InstallPath" -ForegroundColor Gray
 Write-Host "  Serveur partages       : \\$serverFQDN\..." -ForegroundColor Gray
 Write-Host "  Partages SMB           : $(if ($createShares) { 'Oui' } else { 'Non' })" -ForegroundColor Gray
-Write-Host "  Compte WinPE           : $winpeUserFull" -ForegroundColor Gray
+Write-Host "  Account WinPE           : $winpeUserFull" -ForegroundColor Gray
 Write-Host "  Type vault             : $vaultMode" -ForegroundColor Gray
 Write-Host "  Domaine                : $(if ($joinDomain) { $domainName } else { '(standalone)' })" -ForegroundColor Gray
 if ($joinDomain) {
-    Write-Host "  Compte jonction        : $domainName\$domainJoinUser" -ForegroundColor Gray
+    Write-Host "  Account jonction        : $domainName\$domainJoinUser" -ForegroundColor Gray
     Write-Host "  OU par defaut          : $(if ($defaultOU) { $defaultOU } else { '(non defini)' })" -ForegroundColor Gray
 }
 Write-Host "  Architecture WinPE     : $arch" -ForegroundColor Gray
@@ -387,8 +390,8 @@ Write-Host "  SMTP                   : $(if ($smtpServer) { $smtpServer } else {
 Write-Host "  Teams                  : $(if ($teamsWebhook) { 'Configure' } else { '(non configure)' })" -ForegroundColor Gray
 Write-Host ""
 
-if (-not (Read-YesNo "Lancer l'installation ?" $true)) {
-    Write-Warn "Installation annulee."
+if (-not (Read-YesNo "Start the installation?" $true)) {
+    Write-Warn "Installation cancelled."
     exit 0
 }
 
@@ -396,11 +399,11 @@ if (-not (Read-YesNo "Lancer l'installation ?" $true)) {
 # INSTALLATION
 # ---------------------------------------------------------------------------
 
-Write-Header "Installation en cours"
+Write-Header "Installation in progress"
 $errors = [System.Collections.Generic.List[string]]::new()
 
 # -- Structure dossiers -------------------------------------------------------
-Write-Step "Creation de la structure de dossiers..."
+Write-Step "Creating the folder structure..."
 
 $folders = @(
     $InstallPath,
@@ -437,19 +440,19 @@ foreach ($folder in $folders) {
         New-Item -ItemType Directory -Path $folder -Force | Out-Null
     }
 }
-Write-OK "Structure creee ($($folders.Count) dossiers)"
+Write-OK "Structure created ($($folders.Count) dossiers)"
 
 # -- Copie des fichiers -------------------------------------------------------
-Write-Step "Copie des fichiers PSWinDeploy..."
+Write-Step "Copying PSWinDeploy files..."
 
 $scriptDir = Split-Path $PSCommandPath -Parent
 
 if (Test-Path "$scriptDir\Modules") {
     Copy-Item "$scriptDir\Modules" "$InstallPath\App\" -Recurse -Force
     Copy-Item "$scriptDir\Modules" "$InstallPath\Deploy\" -Recurse -Force
-    Write-OK "Modules copies"
+    Write-OK "Modules copied"
 } else {
-    Write-Warn "Dossier Modules absent -- a copier manuellement depuis l'archive"
+    Write-Warn "Modules folder missing -- copy manually from the archive"
     $errors.Add("Modules non copies")
 }
 
@@ -482,7 +485,7 @@ if ((Test-Path $oldFile) -and -not (Test-Path $catFile)) {
     Rename-Item -Path $oldFile -NewName 'catalogue.psd1' -Force -EA SilentlyContinue
     Write-OK "Catalogue uniformise : applications.psd1 -> catalogue.psd1"
 } elseif (-not (Test-Path $catFile)) {
-    # Aucun catalogue fourni : creer un fichier vide valide pour eviter un
+    # Aucun catalogue fourni : createdr un fichier vide valide pour eviter un
     # catalogue introuvable cote API.
     if (-not (Test-Path $catDir)) { New-Item -ItemType Directory $catDir -Force | Out-Null }
     $emptyCat = "@{`r`n    Applications = @()`r`n}"
@@ -491,11 +494,11 @@ if ((Test-Path $oldFile) -and -not (Test-Path $catFile)) {
     Write-OK "Catalogue vide initialise : catalogue.psd1"
 }
 
-Write-OK "Fichiers copies"
+Write-OK "Files copied"
 
 # -- Partages SMB -------------------------------------------------------------
 if ($createShares) {
-    Write-Step "Creation des partages SMB..."
+    Write-Step "Creating SMB shares..."
 
     $shareList = @(
         [PSCustomObject]@{ Name='Images';    Path="$InstallPath\Shares\Images" }
@@ -521,24 +524,24 @@ if ($createShares) {
             Write-OK "  \\$serverFQDN\$($share.Name)"
         } catch {
             Write-Warn "  Echec partage $($share.Name) : $_"
-            $errors.Add("Partage $($share.Name) non cree")
+            $errors.Add("Partage $($share.Name) non created")
         }
     }
 }
 
-# -- Compte local svc-winpe ---------------------------------------------------
+# -- Account local svc-winpe ---------------------------------------------------
 if ($winpeUserMode -eq 'local') {
-    Write-Step "Creation du compte local $winpeUser..."
+    Write-Step "Creating local account $winpeUser..."
     try {
         $secPwd = ConvertTo-SecureString $winpePassword -AsPlainText -Force
         if (Get-LocalUser -Name $winpeUser -ErrorAction SilentlyContinue) {
             Set-LocalUser -Name $winpeUser -Password $secPwd
-            Write-OK "Mot de passe $winpeUser mis a jour"
+            Write-OK "Password $winpeUser updated"
         } else {
             New-LocalUser -Name $winpeUser -Password $secPwd `
-                -Description "Compte service WinPE PSWinDeploy" `
+                -Description "Account service WinPE PSWinDeploy" `
                 -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
-            Write-OK "Compte $winpeUser cree"
+            Write-OK "Account $winpeUser created"
         }
 
         if ($createShares) {
@@ -548,22 +551,22 @@ if ($winpeUserMode -eq 'local') {
             }
             Grant-SmbShareAccess -Name 'Logs' -AccountName $winpeUser `
                 -AccessRight Full -Force -ErrorAction SilentlyContinue | Out-Null
-            Write-OK "Droits SMB attribues a $winpeUser"
+            Write-OK "SMB rights granted to $winpeUser"
         }
     } catch {
-        Write-Warn "Compte $winpeUser : $_"
-        $errors.Add("Compte svc-winpe : $_")
+        Write-Warn "Account $winpeUser : $_"
+        $errors.Add("Account svc-winpe : $_")
     }
 }
 
 # -- Generation PSWinDeploy.psd1 ----------------------------------------------
-Write-Step "Generation de PSWinDeploy.psd1..."
+Write-Step "Generating PSWinDeploy.psd1..."
 
 # Blocs conditionnels
 $domainSection = if ($joinDomain) {
     "    DefaultDomain   = '$domainName'`r`n    DefaultOU       = '$defaultOU'"
 } else {
-    "    # Pas de domaine configure (standalone)"
+    "    # No domain configured (standalone)"
 }
 
 $notifSection = ''
@@ -585,9 +588,9 @@ if ($smtpServer -or $teamsWebhook) {
 }
 
 $vaultPassComment = if ($vaultMode -eq 'AES') {
-    "    # Utiliser variable d'env PSWINDEX_VAULT_PASSWORD ou -VaultPassword au build WinPE"
+    "    # Use env var PSWINDEX_VAULT_PASSWORD or -VaultPassword at WinPE build"
 } else {
-    "    # Mode Plain : pas de mot de passe vault"
+    "    # Plain mode: no vault password"
 }
 
 # Construction du psd1 par concatenation (pas de here-string pour eviter les problemes d'encodage)
@@ -598,7 +601,7 @@ $apiToken = New-RandomString
 $psd1Lines = @(
     '@{'
     '    # Version'
-    "    Version         = '0.7.0'"
+    "    Version         = '0.8.0'"
     "    ProjectName     = 'PSWinDeploy'"
     ''
     '    # ADK / WinPE -- x86 retire depuis ADK 2004, amd64 et arm64 uniquement'
@@ -641,11 +644,11 @@ $psd1Lines = @(
     "    StateFile       = 'C:\Deploy\state.psd1'"
     "    DeployLogPath   = 'C:\Deploy\Logs\deploy.log'"
     ''
-    '    # Compte reseau WinPE'
+    '    # Account reseau WinPE'
     "    WinPEShareServer   = '$serverFQDN'"
     "    WinPEShareServerIP = '$serverIP'"
     "    WinPEShareUser     = '$winpeUserFull'"
-    "    # WinPESharePassword = '...'  # Passer via -ShareVaultPassword lors du build WinPE"
+    "    # WinPESharePassword = '...'  # Pass via -ShareVaultPassword at WinPE build"
     ''
     $domainSection
     ''
@@ -678,11 +681,11 @@ $psd1Path    = "$InstallPath\App\PSWinDeploy.psd1"
 $utf8Bom = New-Object System.Text.UTF8Encoding $true
 [System.IO.File]::WriteAllText($psd1Path, $psd1Content, $utf8Bom)
 Copy-Item $psd1Path "$InstallPath\Deploy\PSWinDeploy.psd1" -Force
-Write-OK "PSWinDeploy.psd1 genere"
+Write-OK "PSWinDeploy.psd1 generated"
 
 # -- Vault de secrets ---------------------------------------------------------
 if (-not $SkipVault) {
-    Write-Step "Creation du vault de secrets..."
+    Write-Step "Creating the secrets vault..."
 
     try {
         # Vault PSD1 plat (format lu directement par le deploiement)
@@ -705,50 +708,50 @@ if (-not $SkipVault) {
         $vaultPath = "$InstallPath\Deploy\secrets.vault.psd1"
         $utf8Bom = New-Object System.Text.UTF8Encoding $true
         [System.IO.File]::WriteAllText($vaultPath, ($vLines -join "`r`n"), $utf8Bom)
-        Write-OK "Vault PSD1 cree : $vaultPath"
+        Write-OK "Vault PSD1 created : $vaultPath"
         $domInfo = if ($domainJoinUser) { ' + jonction AD' } else { '' }
         Write-Info "  Comptes : Administrateur local (builtin) + svc-winpe (acces SMB)$domInfo"
     } catch {
         Write-Warn "Vault : $_"
-        $errors.Add("Vault non cree : $_")
+        $errors.Add("Vault non created : $_")
     }
 }
 
 # -- Web .env -----------------------------------------------------------------
-Write-Step "Configuration interface Web..."
+Write-Step "Configuring web interface..."
 # Le conteneur web (BFF) utilise ces variables. Le mot de passe admin est a
 # generer via la page /hash de la console (PASSWORD_ADMIN_HASH).
 $envLines = @(
     "URL_API_PSWINDEPLOY=http://${serverFQDN}:8080"
     "TOKEN_API_PSWINDEPLOY=$apiToken"
     "ADMIN_USER=admin"
-    "# Genere le hash sur http://<hote-conteneur>:8088/hash puis colle-le ici :"
+    "# Generate the hash at http://<container-host>:8088/hash then paste it here:"
     "PASSWORD_ADMIN_HASH="
     "SESSION_TTL_HOURS=12"
 )
 [System.IO.File]::WriteAllText("$InstallPath\App\Web\.env", ($envLines -join "`r`n"), [System.Text.Encoding]::UTF8)
-Write-OK "Web/.env configure (URL API + token pre-remplis)"
+Write-OK "Web/.env configured (URL API + token pre-remplis)"
 
 # -- Module Pode --------------------------------------------------------------
-Write-Step "Verification de Pode (API REST)..."
+Write-Step "Checking Pode (REST API)..."
 if (Get-Module -ListAvailable -Name Pode -ErrorAction SilentlyContinue) {
     $podeVer = (Get-Module -ListAvailable Pode | Sort-Object Version -Descending | Select-Object -First 1).Version
-    Write-OK "Pode $podeVer deja installe"
+    Write-OK "Pode $podeVer already installed"
 } else {
     try {
         # AllUsers car le script tourne en admin et l'API peut tourner en service
         Install-Module -Name Pode -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
-        Write-OK "Pode installe"
+        Write-OK "Pode installed"
     } catch {
-        Write-Warn "Pode non installe : $_"
-        Write-Warn "Lancer manuellement : Install-Module Pode -Scope CurrentUser -Force"
+        Write-Warn "Pode not installed: $_"
+        Write-Warn "Run manually: Install-Module Pode -Scope CurrentUser -Force"
         $errors.Add("Pode non installe")
     }
 }
 
 # -- Verification ADK ---------------------------------------------------------
 if (-not $SkipADK) {
-    Write-Step "Verification Windows ADK..."
+    Write-Step "Checking Windows ADK..."
     $adkRoots = @(
         'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit',
         'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit'
@@ -759,17 +762,17 @@ if (-not $SkipADK) {
         if (Test-Path $candidate) { $copype = $candidate; break }
     }
     if ($copype) {
-        Write-OK "Windows ADK + WinPE Add-on detectes"
+        Write-OK "Windows ADK + WinPE Add-on detected"
     } else {
-        Write-Warn "ADK ou WinPE Add-on non detectes"
-        Write-Warn "Telecharger : https://learn.microsoft.com/windows-hardware/get-started/adk-install"
-        Write-Warn "Installer : ADK (Deployment Tools seulement) + WinPE Add-on (complet)"
+        Write-Warn "ADK or WinPE Add-on not detected"
+        Write-Warn "Download: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
+        Write-Warn "Install: ADK (Deployment Tools only) + WinPE Add-on (full)"
         $errors.Add("ADK non installe")
     }
 }
 
 # -- Scripts de demarrage -----------------------------------------------------
-Write-Step "Generation des scripts de demarrage..."
+Write-Step "Generating startup scripts..."
 
 # Start-API.ps1
 $apiScript = @(
@@ -794,7 +797,7 @@ $buildScript = @(
     "Import-PSWinDeployConfig -ConfigPath '$InstallPath\App\PSWinDeploy.psd1'"
     ''
     '# Demande le mot de passe vault AES pour chiffrer les credentials WinPE dans l''ISO'
-    '$vaultPwd = Read-Host "Mot de passe vault WinPE (AES)" -AsSecureString'
+    '$vaultPwd = Read-Host "Password vault WinPE (AES)" -AsSecureString'
     '$vaultPwdPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto('
     '    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($vaultPwd))'
     ''
@@ -814,7 +817,7 @@ $buildScript = @(
     [System.Text.Encoding]::UTF8
 )
 
-Write-OK "Start-API.ps1 et Build-WinPE.ps1 generes"
+Write-OK "Start-API.ps1 and Build-WinPE.ps1 generated"
 
 # Console d'administration -- copiee a la racine du dossier d'installation
 $consoleSrc = "$scriptDir\PSWinDeploy-Console.ps1"
@@ -833,85 +836,85 @@ if (Test-Path $consoleSrc) {
 # RESUME FINAL
 # ---------------------------------------------------------------------------
 
-Write-Header "Installation terminee"
+Write-Header "Installation complete"
 
 if ($errors.Count -gt 0) {
-    Write-Warn "$($errors.Count) avertissement(s) a corriger :"
+    Write-Warn "$($errors.Count) warning(s) to fix:"
     foreach ($e in $errors) { Write-Warn "  - $e" }
     Write-Host ""
 }
 
-Write-OK "PSWinDeploy installe dans : $InstallPath"
+Write-OK "PSWinDeploy installed in: $InstallPath"
 Write-Host ""
-Write-Host "  Structure :" -ForegroundColor White
+Write-Host "  Structure:" -ForegroundColor White
 Write-Host "    $InstallPath\" -ForegroundColor Gray
-Write-Host "    +-- App\                  Modules, sequences, profils, API, Web" -ForegroundColor Gray
-Write-Host "    +-- Shares\               Dossiers partages (Images, Deploy, etc.)" -ForegroundColor Gray
-Write-Host "    +-- WinPE\                Workspace et ISO WinPE" -ForegroundColor Gray
-Write-Host "    +-- Deploy\               Moteur local deploiement" -ForegroundColor Gray
-Write-Host "    +-- PSWinDeploy.psd1      Configuration generee" -ForegroundColor Gray
-    Write-Host "    +-- PSWinDeploy-Console.ps1  Console d administration" -ForegroundColor Gray
-Write-Host "    +-- Start-API.ps1         Lance l'API Pode" -ForegroundColor Gray
-Write-Host "    +-- Build-WinPE.ps1       Construit l'ISO WinPE" -ForegroundColor Gray
+Write-Host "    +-- App\                  Modules, sequences, API, Web" -ForegroundColor Gray
+Write-Host "    +-- Shares\               Shared folders (Images, Deploy, etc.)" -ForegroundColor Gray
+Write-Host "    +-- WinPE\                WinPE workspace and ISO" -ForegroundColor Gray
+Write-Host "    +-- Deploy\               Local deployment engine" -ForegroundColor Gray
+Write-Host "    +-- PSWinDeploy.psd1      Generated configuration" -ForegroundColor Gray
+    Write-Host "    +-- PSWinDeploy-Console.ps1  Administration console" -ForegroundColor Gray
+Write-Host "    +-- Start-API.ps1         Starts the Pode API" -ForegroundColor Gray
+Write-Host "    +-- Build-WinPE.ps1       Builds the WinPE ISO" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Prochaines etapes :" -ForegroundColor White
+Write-Host "  Next steps:" -ForegroundColor White
 Write-Host ""
-    Write-Host "  1. Exporter une image Windows depuis un ISO :" -ForegroundColor Cyan
+    Write-Host "  1. Export a Windows image from an ISO:" -ForegroundColor Cyan
     Write-Host "     $InstallPath\App\Scripts\Export-WIMImage.ps1" -ForegroundColor Gray
-    Write-Host "     (monte l ISO, liste les editions, exporte vers $InstallPath\Shares\Images\)" -ForegroundColor DarkGray
+    Write-Host "     (mounts the ISO, lists editions, exports to $InstallPath\Shares\Images\)" -ForegroundColor DarkGray
 Write-Host ""
-    Write-Host "  2. Placer les drivers WinPE dans les sous-dossiers :" -ForegroundColor Cyan
-    Write-Host "     $InstallPath\Shares\Drivers\WinPE\Net\     (NIC - obligatoire)" -ForegroundColor Gray
+    Write-Host "  2. Place WinPE drivers into the subfolders:" -ForegroundColor Cyan
+    Write-Host "     $InstallPath\Shares\Drivers\WinPE\Net\     (NIC - required)" -ForegroundColor Gray
     Write-Host "     $InstallPath\Shares\Drivers\WinPE\Storage\ (NVMe/SATA/RAID)" -ForegroundColor Gray
     Write-Host "     $InstallPath\Shares\Drivers\WinPE\Sys\     (chipset, USB)" -ForegroundColor Gray
     Write-Host "" 
-    Write-Host "  3. Construire l'ISO WinPE :" -ForegroundColor Cyan
+    Write-Host "  3. Build the WinPE ISO:" -ForegroundColor Cyan
 Write-Host "     $InstallPath\Build-WinPE.ps1" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  0. Debloquer les scripts (si telechargement depuis Internet) :" -ForegroundColor Cyan
+Write-Host "  0. Unblock the scripts (if downloaded from the Internet):" -ForegroundColor Cyan
     Write-Host "     $InstallPath\Unblock-PSWinDeploy.ps1" -ForegroundColor Gray
-    Write-Host "     (ou : Unblock-File sur le .zip avant extraction)" -ForegroundColor DarkGray
+    Write-Host "     (or: Unblock-File on the .zip before extracting)" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  1. Lancer la console d administration :" -ForegroundColor Cyan
+    Write-Host "  1. Launch the administration console:" -ForegroundColor Cyan
     Write-Host "     $InstallPath\PSWinDeploy-Console.ps1" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "  3. Demarrer l'API :" -ForegroundColor Cyan
+    Write-Host "  3. Start the API:" -ForegroundColor Cyan
 Write-Host "     $InstallPath\Start-API.ps1" -ForegroundColor Gray
 Write-Host ""
-    Write-Host "  4. Interface Web (conteneur Docker) -- a deployer sur un hote Linux :" -ForegroundColor Cyan
-    Write-Host "     Build/push l'image puis, avec le docker-compose fourni dans App/Web/ :" -ForegroundColor Gray
+    Write-Host "  4. Web interface (Docker container) -- to deploy on a Linux host:" -ForegroundColor Cyan
+    Write-Host "     Build/push the image then, with the docker-compose in App/Web/:" -ForegroundColor Gray
     Write-Host "       docker compose up -d" -ForegroundColor Gray
-    Write-Host "     Variables (deja pre-remplies dans App/Web/.env) :" -ForegroundColor Gray
+    Write-Host "     Variables (already pre-filled in App/Web/.env):" -ForegroundColor Gray
     Write-Host "       URL_API_PSWINDEPLOY   = http://${serverFQDN}:8080" -ForegroundColor DarkGray
     Write-Host "       TOKEN_API_PSWINDEPLOY = $apiToken" -ForegroundColor DarkGray
-    Write-Host "       PASSWORD_ADMIN_HASH   = genere-le sur http://<hote>:8088/hash" -ForegroundColor DarkGray
-    Write-Host "     Console accessible : http://<hote-conteneur>:8088" -ForegroundColor Gray
+    Write-Host "       PASSWORD_ADMIN_HASH   = generate it at http://<host>:8088/hash" -ForegroundColor DarkGray
+    Write-Host "     Console available at: http://<container-host>:8088" -ForegroundColor Gray
 Write-Host ""
-    Write-Host "  IMPORTANT -- Token API genere : $apiToken" -ForegroundColor Yellow
-    Write-Host "     (identique dans PSWinDeploy.psd1 et le .env du conteneur)" -ForegroundColor DarkGray
+    Write-Host "  IMPORTANT -- API token generated: $apiToken" -ForegroundColor Yellow
+    Write-Host "     (same value in PSWinDeploy.psd1 and the container .env)" -ForegroundColor DarkGray
 Write-Host ""
     # Afficher les mots de passe generes aleatoirement : l'admin ne les connait
     # pas autrement (ils sont dans le vault, mais utile de les noter une fois).
     if ($winpeUserMode -eq 'local' -and $winpePasswordMode -eq 'R') {
-        Write-Host "  Mot de passe genere -- $winpeUserFull (acces partages) : $winpePassword" -ForegroundColor Yellow
+        Write-Host "  Password genere -- $winpeUserFull (share access): $winpePassword" -ForegroundColor Yellow
     }
     if ($localAdminPassMode -eq 'R') {
-        Write-Host "  Mot de passe genere -- Administrateur local des machines : $localAdminPass" -ForegroundColor Yellow
+        Write-Host "  Password genere -- machines' local Administrator: $localAdminPass" -ForegroundColor Yellow
     }
     if (($winpeUserMode -eq 'local' -and $winpePasswordMode -eq 'R') -or $localAdminPassMode -eq 'R') {
-        Write-Host "     (note-les : ils sont stockes dans le vault, mais affiches ici une seule fois)" -ForegroundColor DarkGray
+        Write-Host "     (note them down: stored in the vault, but shown here only once)" -ForegroundColor DarkGray
         Write-Host ""
     }
 
 if ($errors.Count -eq 0) {
-    Write-Host "  Tout est pret -- aucune erreur !" -ForegroundColor Green
+    Write-Host "  All set -- no errors!" -ForegroundColor Green
 } else {
-    Write-Host "  Installation partielle -- corriger les avertissements." -ForegroundColor Yellow
+    Write-Host "  Partial installation -- fix the warnings." -ForegroundColor Yellow
 }
 Write-Host ""
 
 if (-not $Silent) {
-    if (Read-YesNo "Ouvrir le dossier dans l'Explorateur ?" $false) {
+    if (Read-YesNo "Open the folder in Explorer?" $false) {
         Start-Process explorer.exe $InstallPath
     }
 }

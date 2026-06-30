@@ -508,15 +508,15 @@ function Show-PSWDRadioPicker {
         Reutilisable pour n'importe quelle selection (drivers, OS, editions...).
     .DESCRIPTION
         Affiche une option par bouton radio + boutons OK / Annuler. Le premier
-        item est coche par defaut. Option "aucun" ajoutee si -NoneLabel fourni.
+        item est coche par defaut. Option "none" ajoutee si -NoneLabel fourni.
     .PARAMETER Title      [string]   Titre de la fenetre.
     .PARAMETER Labels     [string[]] Les libelles, un par bouton radio.
     .PARAMETER Prompt     [string]   Texte affiche au-dessus de la liste.
-    .PARAMETER NoneLabel  [string]   Si non vide, ajoute une option "aucun"
+    .PARAMETER NoneLabel  [string]   Si non vide, ajoute une option "none"
                                      (qui retourne -1). Vide = pas d'option aucun.
     .OUTPUTS [int] ou $null :
         >= 0  : index choisi (base 0) dans $Labels.
-        -1    : l'operateur a annule OU choisi l'option "aucun".
+        -1    : l'operateur a annule OU choisi l'option "none".
         $null : WinForms INDISPONIBLE (WinPE minimal). L'appelant DOIT alors
                 basculer sur un mode console. C'est la difference cle : -1 =
                 choix explicite de ne rien prendre, $null = GUI impossible.
@@ -525,7 +525,7 @@ function Show-PSWDRadioPicker {
         [string]$Title = 'Selection',
         [string[]]$Labels,
         [string]$Prompt = 'Choisissez une option :',
-        [string]$NoneLabel = ''          # si non vide, ajoute une option "aucun" (-1)
+        [string]$NoneLabel = ''          # si non vide, ajoute une option "none" (-1)
     )
     $Labels = @($Labels)
     if ($Global:PSWDDebug) { Write-Host "  [diag] GUI : $($Labels.Count) label(s) recu(s) : $($Labels -join ' | ')" -ForegroundColor DarkGray }
@@ -577,7 +577,7 @@ function Show-PSWDRadioPicker {
             $y += 30
         }
 
-        # Option "Aucun" (seulement si demandee)
+        # Option "None" (seulement si demandee)
         if ($NoneLabel) {
             $rbNone = New-Object System.Windows.Forms.RadioButton
             $rbNone.Text = $NoneLabel

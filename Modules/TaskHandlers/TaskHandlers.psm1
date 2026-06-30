@@ -3,7 +3,7 @@
 # PRINCIPE : chaque handler FAIT une action et retourne TOUJOURS un resultat
 # standard via New-TaskResult (contrat TaskContract). Un handler ne touche JAMAIS
 # au state, au reboot systeme, a l'autologon : c'est le role du moteur (TaskEngine).
-# Un handler dit seulement "j'ai reussi / j'ai besoin d'un reboot / j'ai ete saute".
+# Un handler dit seulement "succeeded / needs a reboot / was skipped".
 #
 # Tous les handlers suivent la signature : param($Step, $Context)
 #   $Step    = le step courant (hashtable ou objet)
@@ -67,7 +67,7 @@ function Invoke-TaskJoinDomain {
         try { $ou = & $gc 'DomainOU' } catch {}
     }
     if ([string]::IsNullOrWhiteSpace("$domain")) {
-        return New-TaskResult -Success:$false -Message "JoinDomain : 'domain' obligatoire (step ou config DomainName)"
+        return New-TaskResult -Success:$false -Message "JoinDomain: 'domain' required (step or DomainName config)"
     }
 
     # IDEMPOTENCE (double securite) :
@@ -76,7 +76,7 @@ function Invoke-TaskJoinDomain {
     $logsDir = Get-Ctx $Context 'LogsDir'; if (-not $logsDir) { $logsDir = 'C:\Deploy\Logs' }
     $joinedMarker = Join-Path $logsDir '.domain-joined'
     if (Test-Path $joinedMarker -EA SilentlyContinue) {
-        Write-TaskLog "Jonction deja effectuee (marqueur present) -- step saute." 'SUCCESS' $Context $Step.id
+        Write-TaskLog "Join already done (marker present) -- step skipped." 'SUCCESS' $Context $Step.id
         return New-TaskResult -Skipped -Message 'deja joint (marqueur)'
     }
     try {
@@ -147,7 +147,7 @@ function Invoke-TaskWaitForNetwork {
             if ($target) { $ok = Test-Connection -ComputerName $target -Count 1 -Quiet -EA SilentlyContinue }
             else { $ok = (Get-NetConnectionProfile -EA SilentlyContinue | Where-Object { $_.IPv4Connectivity -eq 'Internet' -or $_.IPv4Connectivity -eq 'LocalNetwork' }).Count -gt 0 }
         } catch {}
-        if ($ok) { Write-TaskLog "Reseau pret." 'SUCCESS' $Context $Step.id; return New-TaskResult }
+        if ($ok) { Write-TaskLog "Network ready." 'SUCCESS' $Context $Step.id; return New-TaskResult }
         Start-Sleep -Seconds 3
     }
     Write-TaskLog "Reseau non disponible apres ${timeout}s (on continue)." 'WARN' $Context $Step.id
@@ -171,7 +171,7 @@ function Invoke-TaskCleanup {
     $keepLogs = [bool](Get-StepParam $Step 'keepLogs' -Default $true)
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return New-TaskResult }
-    Write-TaskLog "Nettoyage de fin de deploiement..." 'STEP' $Context $Step.id
+    Write-TaskLog "End-of-deployment cleanup..." 'STEP' $Context $Step.id
 
     # Le nettoyage des fichiers sensibles. Les dossiers Scripts/Modules contenant
     # le script en cours peuvent etre verrouilles -> on tente, sans mentir.
@@ -286,10 +286,10 @@ function Initialize-WingetEngine {
             try { $v = & $wg --version 2>&1; if ($LASTEXITCODE -eq 0) { Write-TaskLog "winget pret ($wg) : $v" 'SUCCESS' $Context; return $true } } catch {}
             Write-TaskLog "winget trouve ($wg) mais ne repond pas (code $LASTEXITCODE)." 'WARN' $Context
         } else {
-            Write-TaskLog "winget introuvable apres enregistrement." 'WARN' $Context
+            Write-TaskLog "winget not found after registration." 'WARN' $Context
         }
     } catch { Write-TaskLog "Initialisation winget echouee : $_" 'WARN' $Context }
-    Write-TaskLog "winget indisponible -- repli sur choco pour les installations." 'WARN' $Context
+    Write-TaskLog "winget unavailable -- falling back to choco for installs." 'WARN' $Context
     return $false
 }
 
@@ -395,7 +395,7 @@ function Install-OneApp {
                 else { Write-TaskLog "  winget echec (code $LASTEXITCODE) -- voir install-detail.log" 'WARN' $Context }
             } catch { Write-TaskLog "  winget erreur : $_" 'WARN' $Context; Write-TaskFileLog "install exception: $_" 'WINGET' }
         } else {
-            Write-TaskFileLog "winget INTROUVABLE (Resolve-WingetExe a retourne null)" 'WINGET'
+            Write-TaskFileLog "winget NOT FOUND (Resolve-WingetExe returned null)" 'WINGET'
         }
     }
 
@@ -420,7 +420,7 @@ function Install-OneApp {
                 }
             } catch { Write-TaskLog "  choco erreur : $_" 'WARN' $Context; Write-TaskFileLog "choco exception: $_" 'CHOCO' }
         } else {
-            Write-TaskFileLog "choco INDISPONIBLE (Install-ChocoEngine a echoue)" 'CHOCO'
+            Write-TaskFileLog "choco UNAVAILABLE (Install-ChocoEngine failed)" 'CHOCO'
         }
     }
 
@@ -500,7 +500,7 @@ function Invoke-TaskInstallApps {
     }
 
     if ($appsToInstall.Count -eq 0) {
-        Write-TaskLog "Aucune application a installer." 'WARN' $Context $Step.id
+        Write-TaskLog "No application to install." 'WARN' $Context $Step.id
         return New-TaskResult -Message 'aucune app'
     }
 
@@ -536,7 +536,7 @@ function Invoke-TaskInstallUpdates {
         $result   = $searcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
 
         if (@($result.Updates).Count -eq 0) {
-            Write-TaskLog "Aucune mise a jour disponible -- etape terminee." 'SUCCESS' $Context $Step.id
+            Write-TaskLog "No updates available -- step complete." 'SUCCESS' $Context $Step.id
             try { Remove-Item $passFile -Force -EA SilentlyContinue } catch {}
             return New-TaskResult -Message '0 MAJ'
         }
@@ -582,7 +582,7 @@ function Invoke-TaskRunScript {
     param($Step, $Context)
     $scriptPath = "$(Get-StepParam $Step 'path')"
     $scriptArgs = "$(Get-StepParam $Step 'args' -Default '')"
-    if (-not $scriptPath) { return New-TaskResult -Success:$false -Message "RunScript : 'path' obligatoire" }
+    if (-not $scriptPath) { return New-TaskResult -Success:$false -Message "RunScript: 'path' required" }
 
     # Le chemin accepte DEUX formes :
     #   - chemin UNC/absolu complet : '\\SERVEUR\Scripts\x.ps1' (utilise tel quel)
@@ -615,7 +615,7 @@ function Invoke-TaskRunScript {
         $p = Start-Process $psExe -ArgumentList $argLine -Wait -PassThru -NoNewWindow
         $code = $p.ExitCode
         if ($code -eq 3010) {
-            Write-TaskLog "Reboot en attente detecte apres le script (code 3010)." 'INFO' $Context $Step.id
+            Write-TaskLog "Pending reboot detected after the script (code 3010)." 'INFO' $Context $Step.id
             return New-TaskResult -RebootRequired -Message 'script exit 3010'
         }
         if ($code -eq 0) { return New-TaskResult -Message 'script OK' }
@@ -645,7 +645,7 @@ function Invoke-TaskCopyFiles {
         }
         Copy-Item $source $dest -Recurse -Force -EA Stop
         Write-TaskLog "Copie : $source -> $dest" 'SUCCESS' $Context $Step.id
-        return New-TaskResult -Message "copie OK"
+        return New-TaskResult -Message "copy OK"
     } catch {
         return New-TaskResult -Success:$false -Message "Erreur copie : $_"
     }
@@ -659,7 +659,7 @@ function Invoke-TaskSetRegistry {
     $key   = "$(Get-StepParam $Step 'key')"     # ex: HKLM:\SOFTWARE\Corp\Param
     $value = Get-StepParam $Step 'value'
     $type  = "$(Get-StepParam $Step 'type' -Default 'String')"
-    if (-not $key) { return New-TaskResult -Success:$false -Message "SetRegistry : 'key' obligatoire" }
+    if (-not $key) { return New-TaskResult -Success:$false -Message "SetRegistry: 'key' required" }
     try {
         $regPath = Split-Path $key -Parent
         $regName = Split-Path $key -Leaf
@@ -678,7 +678,7 @@ function Invoke-TaskSetRegistry {
 function Invoke-TaskSetComputerName {
     param($Step, $Context)
     $newName = "$(Get-StepParam $Step 'name')"
-    if (-not $newName) { return New-TaskResult -Success:$false -Message "SetComputerName : 'name' obligatoire" }
+    if (-not $newName) { return New-TaskResult -Success:$false -Message "SetComputerName: 'name' required" }
 
     # Idempotence : si la machine porte deja ce nom, ne rien faire.
     if ("$env:COMPUTERNAME" -ieq $newName) {

@@ -92,7 +92,7 @@ function Show-DiskMap {
     param([switch]$Quiet)
 
     $disks = @(Get-Disk | Sort-Object Number)
-    if (@($disks).Count -eq 0) { throw "Aucun disque detecte !" }
+    if (@($disks).Count -eq 0) { throw "No disk detected!" }
 
     if (-not $Quiet) {
         Clear-Host
@@ -228,7 +228,7 @@ function Invoke-DiskSelector {
     }
 
     if (@($selectable).Count -eq 0) {
-        throw "Aucun disque selectionnable disponible.`nTous les disques sont systeme ou hors ligne."
+        throw "No selectable disk available.`nAll disks are system or offline."
     }
 
     # Auto-selection si un seul disque disponible
@@ -240,7 +240,7 @@ function Invoke-DiskSelector {
     }
 
     # -- Prompt de selection --
-    Write-ConsoleLine "  Disques disponibles pour le deploiement :" -Color Cyan
+    Write-ConsoleLine "  Disks available for deployment:" -Color Cyan
     Write-ConsoleLine ""
 
     foreach ($d in $selectable) {
@@ -255,7 +255,7 @@ function Invoke-DiskSelector {
 
     $choice = $null
     while ($null -eq $choice) {
-        Write-ConsoleLine "  Entrez le numero du disque cible" -Color Cyan -NoNewline
+        Write-ConsoleLine "  Enter the target disk number" -Color Cyan -NoNewline
         Write-ConsoleLine " [$($validNums -join '/')] " -Color Yellow -NoNewline
         $input = (Read-Host).Trim()
 
@@ -276,7 +276,7 @@ function Invoke-DiskSelector {
     Write-ConsoleLine "  |  Disque : $($selected.Number) -- $($selected.FriendlyName)" -Color Yellow
     Write-ConsoleLine "  |  Taille : $($selected.SizeStr)" -Color Yellow
     if ($selected.IsSystem) {
-        Write-ConsoleLine "  |  /!\ DISQUE SYSTEME -- Toutes les donnees seront perdues !" -Color Red
+        Write-ConsoleLine "  |  /!\ SYSTEM DISK -- All data will be lost!" -Color Red
     }
     Write-ConsoleLine "  +-------------------------------------------------+" -Color Yellow
     Write-ConsoleLine ""
@@ -336,7 +336,7 @@ function Invoke-WIMIndexSelector {
     Write-ConsoleLine ""
 
     # Recuperation des index via DISM
-    Write-ConsoleLine "  Lecture des images disponibles..." -Color DarkGray
+    Write-ConsoleLine "  Reading available images..." -Color DarkGray
     $output = & dism.exe /Get-WimInfo /WimFile:"$WimPath" 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Impossible de lire le WIM : $WimPath" }
 
@@ -457,7 +457,7 @@ function Invoke-PreDeployWizard {
     Write-ConsoleBox -Title " PSWinDeploy -- Assistant de deploiement Windows " -Width 68 -Color Cyan
     Write-ConsoleLine ""
     Write-ConsoleLine "  Bienvenue dans PSWinDeploy, le successeur de MDT." -Color Gray
-    Write-ConsoleLine "  Cet assistant va guider le deploiement pas a pas." -Color Gray
+    Write-ConsoleLine "  This assistant will guide the deployment step by step." -Color Gray
     Write-ConsoleLine ""
     Start-Sleep 1
 
@@ -471,7 +471,7 @@ function Invoke-PreDeployWizard {
         }
 
         if (@($availableWims).Count -eq 0) {
-            Write-ConsoleLine "  Aucun fichier WIM trouve dans les chemins configures." -Color Red
+            Write-ConsoleLine "  No WIM file found in the configured paths." -Color Red
             Write-ConsoleLine "  Chemin manuel (ex: \\\\serveur\\images\\win11.wim) : " -Color Yellow -NoNewline
             $WimPath = Read-Host
         } elseif (@($availableWims).Count -eq 1) {
@@ -518,7 +518,7 @@ function Invoke-PreDeployWizard {
     } catch {
         # Demande manuelle si la detection echoue
         Write-ConsoleLine ""
-        Write-ConsoleLine "  Impossible de detecter le firmware automatiquement." -Color Yellow
+        Write-ConsoleLine "  Cannot detect the firmware automatically." -Color Yellow
         Write-ConsoleLine "  Type de firmware " -Color Cyan -NoNewline
         Write-ConsoleLine "[UEFI/BIOS] (defaut: UEFI) : " -Color Yellow -NoNewline
         $fwInput = (Read-Host).Trim().ToUpper()
@@ -531,7 +531,7 @@ function Invoke-PreDeployWizard {
     $wimFileName = Split-Path $WimPath -Leaf
 
     Clear-Host
-    Write-ConsoleBox -Title " Recapitulatif du deploiement " -Width 68 -Color Green
+    Write-ConsoleBox -Title " Deployment summary " -Width 68 -Color Green
     Write-ConsoleLine ""
     Write-ConsoleLine "  Image Windows  : $wimFileName [Index $wimIndex]" -Color White
     Write-ConsoleLine "  Source WIM     : $WimPath" -Color Gray
@@ -540,25 +540,25 @@ function Invoke-PreDeployWizard {
     Write-ConsoleLine ""
     Write-ConsoleLine "  +==================================================+" -Color Red
     Write-ConsoleLine "  |  Le disque $DiskNumber sera ENTIEREMENT EFFACE !          |" -Color Red
-    Write-ConsoleLine "  |  Toutes les donnees existantes seront PERDUES.   |" -Color Red
+    Write-ConsoleLine "  |  All existing data will be LOST.                |" -Color Red
     Write-ConsoleLine "  +==================================================+" -Color Red
     Write-ConsoleLine ""
 
     $go = $null
     while ($go -notin @('oui','non','o','n')) {
-        Write-ConsoleLine "  Lancer le deploiement ? " -Color Green -NoNewline
+        Write-ConsoleLine "  Start the deployment? " -Color Green -NoNewline
         Write-ConsoleLine "[oui/non] " -Color Yellow -NoNewline
         $go = (Read-Host).Trim().ToLower()
     }
 
     if ($go -in @('non','n')) {
         Write-ConsoleLine ""
-        Write-ConsoleLine "  Deploiement annule." -Color Yellow
+        Write-ConsoleLine "  Deployment cancelled." -Color Yellow
         return $null
     }
 
     Write-ConsoleLine ""
-    Write-ConsoleLine "  Demarrage du deploiement..." -Color Green
+    Write-ConsoleLine "  Starting deployment..." -Color Green
     Write-ConsoleLine ""
     Start-Sleep 2
 
@@ -580,7 +580,7 @@ function Show-DiskSummary {
 function Select-TargetDisk {
     <#Selectionne le disque cible de facon simple et fiable (compatible WinPE PS 5.1)#>
     $disks = @(Get-Disk | Sort-Object Number)
-    if (@($disks).Count -eq 0) { throw "Aucun disque detecte" }
+    if (@($disks).Count -eq 0) { throw "No disk detected" }
 
     # Afficher la liste
     Write-Host ""
@@ -588,7 +588,7 @@ function Select-TargetDisk {
         $sizeGB = if ($d.Size) { "$([Math]::Round($d.Size/1GB,0)) GB" } else { "?" }
         $style  = if ($d.PartitionStyle) { $d.PartitionStyle } else { "RAW" }
         $mark   = if ($d.IsBoot) { " [SYSTEME EN COURS]" } else { "" }
-        Write-Host ("  Disque {0}  {1,-30} {2,8}  {3}{4}" -f `
+        Write-Host ("  Disk {0}  {1,-30} {2,8}  {3}{4}" -f `
             $d.Number, $d.FriendlyName, $sizeGB, $style, $mark) -ForegroundColor White
         # Lister les partitions
         $parts = @(Get-Partition -DiskNumber $d.Number -ErrorAction SilentlyContinue 2>$null)

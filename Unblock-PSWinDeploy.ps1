@@ -84,7 +84,7 @@ foreach ($ext in $extensions) {
 Write-Host ""
 Write-Host "  $total fichier(s) analyses" -ForegroundColor Gray
 if ($blocked -eq 0) {
-    Write-Host "  Aucun fichier bloque -- deja debloques ou extraits localement" -ForegroundColor Cyan
+    Write-Host "  No blocked file -- already unblocked or extracted locally" -ForegroundColor Cyan
 } else {
     Write-Host "  $blocked fichier(s) bloques detectes" -ForegroundColor Yellow
     Write-Host "  $fixed fichier(s) debloque(s)" -ForegroundColor Green

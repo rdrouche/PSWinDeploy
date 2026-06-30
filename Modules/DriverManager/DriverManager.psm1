@@ -43,7 +43,7 @@ function Get-DriverModelFolders {
         $fName = if ($f.PSObject.Properties['Name']) { "$($f.Name)" } else { '' }
         $fPath = if ($f.PSObject.Properties['FullName']) { "$($f.FullName)" } else { '' }
         Write-DrvLog "  [diag]  - dossier: '$fName' ($fPath)" 'DIAG'
-        if (-not $fName -or -not $fPath) { Write-DrvLog "  [diag]    -> ignore (nom/chemin vide)" 'WARN'; continue }
+        if (-not $fName -or -not $fPath) { Write-DrvLog "  [diag]    -> ignored (empty name/path)" 'WARN'; continue }
         # Exclure WinPE (toute casse) -- c'est le dossier des drivers du WinPE.
         if ($fName -ieq 'WinPE') { Write-DrvLog "  [diag]    -> exclu (WinPE)" 'DIAG'; continue }
         $infItems = @(Get-ChildItem -LiteralPath $fPath -Filter '*.inf' -Recurse -Force -EA SilentlyContinue)
@@ -257,10 +257,10 @@ function Import-DriversFromMedia {
     #>
     param([string]$SubPath = '')
 
-    Write-DrvLog "=== Assistant : chargement de drivers depuis un support externe ===" 'STEP'
+    Write-DrvLog "=== Assistant: loading drivers from external media ===" 'STEP'
     $drives = @(Get-RemovableDriveLetters)
     if ($drives.Count -eq 0) {
-        Write-DrvLog "Aucun lecteur amovible/CD detecte." 'WARN'
+        Write-DrvLog "No removable/CD drive detected." 'WARN'
         return $false
     }
 
@@ -276,7 +276,7 @@ function Import-DriversFromMedia {
     }
     $candidates = @($candidates.ToArray())
     if ($candidates.Count -eq 0) {
-        Write-DrvLog "Aucun driver (.inf) trouve sur les supports detectes." 'WARN'
+        Write-DrvLog "No driver (.inf) found on the detected media." 'WARN'
         Write-DrvLog "Lecteurs scannes : $($drives -join ', ')" 'INFO'
         return $false
     }
@@ -308,7 +308,7 @@ function Import-DriversFromMedia {
     try { & pnputil.exe /add-driver (Join-Path $chosen.Root '*.inf') /subdirs 2>&1 | Out-Null } catch {}
 
     Write-DrvLog "$loaded driver(s) charge(s). Les disques/NIC devraient maintenant apparaitre." 'SUCCESS'
-    Write-DrvLog "Astuce : relancez la detection de disque si necessaire." 'INFO'
+    Write-DrvLog "Tip: re-run disk detection if needed." 'INFO'
     return ($loaded -gt 0)
 }
 

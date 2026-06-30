@@ -1,5 +1,5 @@
 ﻿@{
-    ModuleVersion     = '0.7.0'
+    ModuleVersion     = '0.8.0'
     GUID              = 'a1b2c3d4-0003-0003-0003-000000000003'
     Author            = 'PSWinDeploy'
     Description       = "Moteur d'execution des sequences de deploiement JSON"

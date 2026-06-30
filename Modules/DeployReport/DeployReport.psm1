@@ -49,7 +49,7 @@ function Set-DeployApiEndpoint {
         [string]$RuntimeDir = 'C:\Deploy\Runtime'
     )
     if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
-        Write-DRLog "Pas d'URL d'API fournie : suivi des deploiements desactive." 'INFO'
+        Write-DRLog "No API URL provided: deployment monitoring disabled." 'INFO'
         return
     }
     if (-not (Test-Path $RuntimeDir)) {
@@ -64,7 +64,7 @@ function Set-DeployApiEndpoint {
     if (-not [string]::IsNullOrWhiteSpace($ApiToken)) {
         try {
             Set-Content -Path (Join-Path $RuntimeDir 'api-token.txt') -Value $ApiToken.Trim() -Encoding UTF8 -NoNewline -EA Stop
-            Write-DRLog "Token API depose pour le suivi." 'OK'
+            Write-DRLog "API token saved for monitoring." 'OK'
         } catch {
             Write-DRLog "Impossible d'ecrire api-token.txt : $($_.Exception.Message)" 'WARN'
         }
@@ -206,7 +206,7 @@ function Get-DeployClientMac {
 }
 
 function Register-DeployWaiting {
-    <# .SYNOPSIS Le poste s'annonce "en attente" d'une sequence poussee depuis
+    <# .SYNOPSIS Le poste s'annonce "waiting" d'une sequence poussee depuis
         l'interface web. A rappeler periodiquement (heartbeat d'attente).
         Retourne $true si l'enregistrement a abouti. #>
     param(
@@ -231,7 +231,7 @@ function Register-DeployWaiting {
 }
 
 function Get-DeployPending {
-    <# .SYNOPSIS Le poste demande s'il a une sequence en attente. Retourne un
+    <# .SYNOPSIS Le poste demande s'il a une sequence waiting. Retourne un
         objet { Label; SequenceText } si une sequence a ete poussee, sinon $null. #>
     param(
         [Parameter(Mandatory)][string]$ApiUrl,

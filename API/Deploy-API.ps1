@@ -109,7 +109,7 @@ Start-PodeServer -Threads 2 {
     if ($apiToken) {
         Write-Host "  Securite API : token requis pour les modifications (POST/PUT/DELETE)." -ForegroundColor Yellow
     } else {
-        Write-Host "  Securite API : acces libre (aucun apiToken configure)." -ForegroundColor DarkGray
+        Write-Host "  API security: open access (no apiToken configured)." -ForegroundColor DarkGray
     }
 
     # -- Transport --
@@ -877,7 +877,7 @@ Start-PodeServer -Threads 2 {
 
     Add-PodeRoute -Method Get -Path '/api/health' -ScriptBlock {
         # Version lue dynamiquement depuis le fichier VERSION (source unique).
-        $ver = '0.7.0'
+        $ver = '0.8.0'
         try {
             $vf = Join-Path (Get-PodeState -Name 'ProjectRoot') 'VERSION'
             if (Test-Path $vf -EA SilentlyContinue) { $ver = (Get-Content $vf -Raw).Trim() }

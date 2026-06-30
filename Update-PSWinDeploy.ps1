@@ -196,7 +196,7 @@ Write-Host "  ==========================================================" -Foreg
 Write-Host "        PSWinDeploy -- Mise a jour                          " -ForegroundColor Cyan
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
-if ($DryRun) { Write-Host "  MODE SIMULATION -- Aucun fichier ne sera modifie" -ForegroundColor DarkYellow; Write-Host "" }
+if ($DryRun) { Write-Host "  SIMULATION MODE -- No file will be modified" -ForegroundColor DarkYellow; Write-Host "" }
 
 # ---------------------------------------------------------------------------
 # DETECTION INSTALLPATH
@@ -338,7 +338,7 @@ if ($sourceVersion -ne '0.0.0' -and $installedVersion -ne '0.0.0') {
         $ins = [System.Version]::new(($installedVersion -replace '[^0-9.]',''))
         if ($src -le $ins -and -not $Force -and -not $All) {
             Write-Warn "Source v$sourceVersion <= installee v$installedVersion"
-            if (-not (Read-YesNo "Forcer la mise a jour ?" $false)) { Write-Info "Annule."; exit 0 }
+            if (-not (Read-YesNo "Forcer la mise a jour ?" $false)) { Write-Info "Cancelled."; exit 0 }
         } else {
             Write-OK "Mise a jour : v$installedVersion -> v$sourceVersion"
         }
@@ -360,14 +360,14 @@ Write-Info "Dest   App : $dstApp"
 # SAUVEGARDE
 # ---------------------------------------------------------------------------
 
-Write-Header "Sauvegarde"
+Write-Header "Backup"
 
 $backupDir = Join-Path $InstallPath "Backup-$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 if (-not $DryRun) {
-    $doBackup = $Force -or $All -or (Read-YesNo "Creer une sauvegarde avant la mise a jour ?" $true)
+    $doBackup = $Force -or $All -or (Read-YesNo "Create a backup before updating?" $true)
     if ($doBackup) {
-        Write-Step "Sauvegarde..."
+        Write-Step "Backing up..."
         New-Item -ItemType Directory $backupDir -Force | Out-Null
         foreach ($item in @('Modules','Scripts','API')) {
             $src2 = Join-Path $dstApp $item
@@ -390,10 +390,10 @@ Write-Header "Mode de mise a jour"
 $updateAll = $Force -or $All
 
 if (-not $DryRun -and -not $updateAll) {
-    Write-Host "  [1] Tout mettre a jour (recommande)" -ForegroundColor White
+    Write-Host "  [1] Update everything (recommended)" -ForegroundColor White
     Write-Host "       Modules + Scripts + API + Web + scripts racine" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [2] Choisir composant par composant" -ForegroundColor White
+    Write-Host "  [2] Choose component by component" -ForegroundColor White
     Write-Host "       Confirmation individuelle pour chaque groupe" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [3] Simulation (DryRun)" -ForegroundColor White
@@ -496,7 +496,7 @@ if (-not $DryRun -and $totalUpdated -gt 0) {
         ForEach-Object { Unblock-File $_.FullName -EA SilentlyContinue }
     Get-ChildItem $InstallPath -Filter '*.ps1' -EA SilentlyContinue |
         ForEach-Object { Unblock-File $_.FullName -EA SilentlyContinue }
-    Write-OK "Fichiers debloque"
+    Write-OK "Files unblocked"
 }
 
 # Fichiers preserves

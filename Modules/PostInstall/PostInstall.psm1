@@ -9,8 +9,8 @@
                    <prefixe>-<MAC>.psd1 sur le partage). On la deroule.
 
       SCENARIO B : rien de prevu -> assistant interactif :
-                     [1] Partir d'un modele de sequence
-                     [2] Construire a la volee (apps / MAJ / scripts)
+                     [1] Start from a sequence template
+                     [2] Construire on the fly (apps / MAJ / scripts)
                    Les choix sont faits EN UNE FOIS, puis tout est execute.
 
     Gestion des reboots : tant que la sequence n'est pas terminee, l'assistant
@@ -162,7 +162,7 @@ function Show-PostInstallWizard {
     <#
     .SYNOPSIS Assistant interactif (scenario B) : aucune sequence prevue.
     .DESCRIPTION
-        Propose : [1] partir d'un modele, [2] construire a la volee.
+        Propose : [1] partir d'un modele, [2] construire on the fly.
         Retourne le chemin d'une sequence prete a executer (.psd1), ou $null si
         l'operateur choisit de ne rien faire.
         Utilise les fonctions Hooks (surchargeable GUI).
@@ -171,24 +171,24 @@ function Show-PostInstallWizard {
     #>
     param([string]$SeqDir, [string]$RuntimeDir = 'C:\Deploy\Runtime', [string]$ScriptShare = '', [string]$SoftwareShare = '', [string]$CatalogueShare = '')
 
-    Write-PILog "=== Menu de deploiement -- Que souhaitez-vous faire ? ===" 'STEP'
+    Write-PILog "=== Deployment menu -- What would you like to do? ===" 'STEP'
 
-    $choice = Show-PSWDList -Title "Menu de deploiement -- Que souhaitez-vous faire ?" -Items @(
+    $choice = Show-PSWDList -Title "Deployment menu -- What would you like to do?" -Items @(
         'Partir d''un modele de sequence',
-        'Construire a la volee (applications / MAJ / scripts)',
+        'Build on the fly (apps / updates / scripts)',
         'Attendre une sequence poussee depuis l''interface web',
-        'Terminer le deploiement (nettoie C:\Deploy, garde Logs)',
-        'Quitter SANS nettoyer (laisse C:\Deploy intact)'
+        'Finish deployment (clean C:\Deploy, keep Logs)',
+        'Quit WITHOUT cleaning (leave C:\Deploy intact)'
     )
 
     switch ($choice) {
         0 { return (Select-TemplateSequence -SeqDir $SeqDir) }
         1 { return (Build-SequenceInteractive -RuntimeDir $RuntimeDir -ScriptShare $ScriptShare -SoftwareShare $SoftwareShare -CatalogueShare $CatalogueShare) }
         2 {
-            # Mode "en attente" : le poste va poller l'API et jouer la sequence
+            # Mode "waiting" : le poste va poller l'API et jouer la sequence
             # poussee depuis l'interface web. La boucle d'attente est geree par
             # l'appelant (Start-Deploy), qui dispose de l'URL/token API.
-            Write-PILog "Mode attente : en attente d'une sequence depuis l'interface web." 'STEP'
+            Write-PILog "Wait mode: waiting for a sequence from the web interface." 'STEP'
             return @{ __action = 'wait-web' }
         }
         3 {
@@ -197,12 +197,12 @@ function Show-PostInstallWizard {
             return @{ __action = 'done-cleaned' }
         }
         4 {
-            Write-PILog "Quitter sans nettoyer : C:\Deploy laisse intact." 'INFO'
+            Write-PILog "Quit without cleaning: C:\Deploy left intact." 'INFO'
             return @{ __action = 'done-nocleanup' }
         }
         default {
             # Par defaut (Echap / rien) = terminer ET nettoyer, comme convenu.
-            Write-PILog "Fin par defaut : nettoyage de C:\Deploy." 'INFO'
+            Write-PILog "Default ending: cleaning C:\Deploy." 'INFO'
             Invoke-PostInstallCleanup
             return @{ __action = 'done-cleaned' }
         }
@@ -214,7 +214,7 @@ function Invoke-PostInstallCleanup {
     .SYNOPSIS Nettoyage de fin depuis l'assistant : supprime les fichiers sensibles
         de C:\Deploy, conserve C:\Deploy\Logs. Equivalent du step 'Cleanup'.
     #>
-    Write-PILog "Nettoyage de fin de deploiement (C:\Deploy)..." 'STEP'
+    Write-PILog "End-of-deployment cleanup (C:\Deploy)..." 'STEP'
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return }
     try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:`$false -EA SilentlyContinue | Out-Null } catch {}
@@ -267,7 +267,7 @@ function Invoke-PostInstallCleanup {
             Write-PILog "  Dossiers restants ($($deferred -join ', ')) : a supprimer manuellement (script en cours d'execution)." 'WARN'
         }
     }
-    Write-PILog "Nettoyage termine. Logs conserves : C:\Deploy\Logs" 'OK'
+    Write-PILog "Cleanup complete. Logs kept: C:\Deploy\Logs" 'OK'
 }
 
 function Select-TemplateSequence {
@@ -288,7 +288,7 @@ function Select-TemplateSequence {
         if ($null -ne $pick -and $pick -ge 0) { $idx = $pick }
     }
     if ($idx -lt 0) {
-        $idx = Show-PSWDList -Title "Choisir un modele de sequence" -Items ($templates.BaseName)
+        $idx = Show-PSWDList -Title "Choose a sequence template" -Items ($templates.BaseName)
     }
     if ($idx -lt 0 -or $idx -ge $templates.Count) { return $null }
     $chosen = $templates[$idx].FullName
@@ -313,7 +313,7 @@ function Select-TemplateSequence {
 
 function Build-SequenceInteractive {
     <#
-    .SYNOPSIS Construit une sequence "a la volee" : choix groupes puis generation.
+    .SYNOPSIS Construit une sequence "on the fly" : choix groupes puis generation.
     .DESCRIPTION
         Demande EN UNE FOIS : MAJ Windows ? applications ? scripts ? Puis genere
         une sequence .psd1 dans RuntimeDir, avec les steps correspondants et la
@@ -321,7 +321,7 @@ function Build-SequenceInteractive {
     #>
     param([string]$RuntimeDir = 'C:\Deploy\Runtime', [string]$ScriptShare = '', [string]$SoftwareShare = '', [string]$CatalogueShare = '')
 
-    Write-PILog "Construction d'une sequence a la volee" 'STEP'
+    Write-PILog "Building a sequence on the fly" 'STEP'
 
     # Jonction domaine : proposee en 1er (elle doit se faire avant le reste).
     # Le domaine/OU sont lus depuis PSWinDeploy.psd1 (DomainName/DomainOU), les
@@ -333,14 +333,14 @@ function Build-SequenceInteractive {
         $doDomain = Request-PSWDYesNo -Question "Joindre le domaine $cfgDomainName ?" -Default $false
     } else {
         if (Request-PSWDYesNo -Question "Joindre un domaine Active Directory ?" -Default $false) {
-            $cfgDomainName = Request-PSWDString -Question "Nom du domaine (ex: corp.local)" -Default ''
+            $cfgDomainName = Request-PSWDString -Question "Domain name (e.g. corp.local)" -Default ''
             if ($cfgDomainName) { $doDomain = $true }
         }
     }
 
-    $doUpdates = Request-PSWDYesNo -Question "Installer les mises a jour Windows ?" -Default $true
-    $doApps    = Request-PSWDYesNo -Question "Installer des applications ?" -Default $false
-    $doScript  = Request-PSWDYesNo -Question "Executer un ou des scripts PowerShell ?" -Default $false
+    $doUpdates = Request-PSWDYesNo -Question "Install Windows updates?" -Default $true
+    $doApps    = Request-PSWDYesNo -Question "Install applications?" -Default $false
+    $doScript  = Request-PSWDYesNo -Question "Run one or more PowerShell scripts?" -Default $false
 
     $selectedApps = @()
     if ($doApps) {
@@ -391,7 +391,7 @@ function Build-SequenceInteractive {
             Write-PILog "Catalogue : $($catalogue.Count) application(s) disponibles" 'INFO'
             # Si l'UI offre une liste multi-choix, l'utiliser ; sinon oui/non par app.
             if (Get-Command Show-PSWDMultiList -EA SilentlyContinue) {
-                $picked = Show-PSWDMultiList -Title "Choisir les applications a installer" -Items $items
+                $picked = Show-PSWDMultiList -Title "Choose the applications to install" -Items $items
                 foreach ($idx in $picked) { if ($idx -ge 0 -and $idx -lt $catalogue.Count) { $selectedApps += $catalogue[$idx] } }
             } else {
                 for ($i=0; $i -lt $catalogue.Count; $i++) {
@@ -404,9 +404,9 @@ function Build-SequenceInteractive {
             # Pas de catalogue : on N'INSTALLE RIEN (pas de saisie manuelle).
             # Le catalogue doit etre configure dans Deploy\Catalogue. On informe
             # clairement plutot que de demander des noms a l'aveugle.
-            Write-PILog "Aucun catalogue d'applications trouve." 'WARN'
+            Write-PILog "No application catalogue found." 'WARN'
             Write-PILog "Configurez un catalogue dans Deploy\Catalogue (cle CataloguePath du psd1)." 'INFO'
-            Write-PILog "Aucune application ne sera installee." 'INFO'
+            Write-PILog "No application will be installed." 'INFO'
         }
     }
     $selectedScripts = @()
@@ -427,7 +427,7 @@ function Build-SequenceInteractive {
             $scriptLabels = @()
             foreach ($sc in $scriptsAvail) { $scriptLabels += $sc.FullName.Substring($ScriptShare.Length).TrimStart('\') }
             if (Get-Command Show-PSWDMultiList -EA SilentlyContinue) {
-                $picked = Show-PSWDMultiList -Title "Choisir les scripts a executer" -Items $scriptLabels
+                $picked = Show-PSWDMultiList -Title "Choose the scripts to run" -Items $scriptLabels
                 foreach ($idx in $picked) { if ($idx -ge 0 -and $idx -lt $scriptsAvail.Count) { $selectedScripts += $scriptsAvail[$idx].FullName } }
             } else {
                 for ($i=0; $i -lt $scriptsAvail.Count; $i++) {
@@ -439,7 +439,7 @@ function Build-SequenceInteractive {
         } else {
             # Pas de script sur le partage : on n'en met aucun (pas de saisie manuelle).
             Write-PILog "Aucun script trouve sur le partage ($ScriptShare)." 'WARN'
-            Write-PILog "Deposez vos scripts .ps1 sur le partage Scripts pour les voir ici." 'INFO'
+            Write-PILog "Drop your .ps1 scripts on the Scripts share to see them here." 'INFO'
         }
     }
 
@@ -485,14 +485,14 @@ function Build-SequenceInteractive {
     }
 
     if ($steps.Count -eq 0) {
-        Write-PILog "Aucune action selectionnee -- rien a faire." 'INFO'
+        Write-PILog "No action selected -- nothing to do." 'INFO'
         return $null
     }
 
     $lines = @()
     $lines += '@{'
     $lines += "    Id = 'postinstall-volee'"
-    $lines += "    Name = 'Post-installation (construite a la volee)'"
+    $lines += "    Name = 'Post-installation (built on the fly)'"
     $lines += "    Version = '1.0.0'"
     $lines += "    Metadata = @{ Os = 'Windows'; Locale = 'fr-FR' }"
     $lines += "    Options = @{ ContinueOnError = `$true; LogLevel = 'Info' }"

@@ -130,13 +130,13 @@ function Build-DeployMessage {
             $color     = if ($isSuccess) { 'Good' } else { 'Attention' }
             $factsList = @(
                 @{ title = "Machine";    value = $machine }
-                @{ title = "Profil";     value = $profileName }
+                @{ title = "Profile";     value = $profileName }
                 @{ title = "Duree";      value = $duration }
                 @{ title = "Steps";      value = "$stepsDone completes" }
                 @{ title = "Reboots";    value = "$reboots" }
                 @{ title = "Date";       value = $timestamp }
             )
-            if ($errorMsg) { $factsList += @{ title = "Erreur"; value = $errorMsg } }
+            if ($errorMsg) { $factsList += @{ title = "Error"; value = $errorMsg } }
 
             $card = [PSCustomObject]@{
                 '@type'      = 'MessageCard'
@@ -232,7 +232,7 @@ function Send-DeployMailNotification {
             if ($smtpPwd) {
                 $mailParams.Credential = New-Object PSCredential($cfg.SmtpUser, (ConvertTo-SecureString $smtpPwd -AsPlainText -Force))
             }
-        } catch { Write-NLog "Impossible de charger le credential SMTP depuis le vault" -Level WARN }
+        } catch { Write-NLog "Cannot load the SMTP credential from the vault" -Level WARN }
     }
 
     try {
@@ -393,7 +393,7 @@ function Send-DeployNotification {
     }
 
     if ($sent -eq 0 -and $failed -eq 0) {
-        Write-NLog "Aucun canal de notification configure -- skip" -Level WARN
+        Write-NLog "No notification channel configured -- skip" -Level WARN
         Write-NLog "Configurer Notifications.Mail / Notifications.Teams dans PSWinDeploy.psd1" -Level INFO
     } else {
         Write-NLog "$sent canal(aux) notifie(s), $failed echec(s)" -Level $(if ($failed -eq 0) {'SUCCESS'} else {'WARN'})

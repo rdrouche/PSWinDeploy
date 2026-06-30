@@ -330,7 +330,7 @@ function Add-WinPEDriver {
         [switch]$UnsignedDrivers
     )
 
-    Write-WinPELog "=== Injection de drivers ===" -Level STEP
+    Write-WinPELog "=== Injecting drivers ===" -Level STEP
 
     if (-not (Test-Path $MountPath)) {
         throw "Point de montage introuvable : $MountPath"
@@ -344,7 +344,7 @@ function Add-WinPEDriver {
     $localDriverPath = $DriverPath
     $tmpDriverDir    = $null
     if ($DriverPath -match '^\\\\') {
-        Write-WinPELog "Chemin UNC detecte -- copie locale avant injection DISM" -Level INFO
+        Write-WinPELog "UNC path detected -- local copy before DISM injection" -Level INFO
         $tmpDriverDir    = Join-Path $env:TEMP "winpe-drivers-$(Get-Random)"
         New-Item -ItemType Directory $tmpDriverDir -Force | Out-Null
         Copy-Item "$DriverPath\*" $tmpDriverDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -404,7 +404,7 @@ function Add-WinPEPackage {
         [string]$Architecture = $script:Config.Architecture
     )
 
-    Write-WinPELog "=== Ajout de packages WinPE ===" -Level STEP
+    Write-WinPELog "=== Adding WinPE packages ===" -Level STEP
 
     # Mapping noms raccourcis -> noms de packages ADK reels
     $packageMap = @{
@@ -706,15 +706,15 @@ function Save-WinPEImage {
         [switch]$Discard
     )
 
-    Write-WinPELog "=== Demontage du WIM ===" -Level STEP
+    Write-WinPELog "=== Unmounting the WIM ===" -Level STEP
 
     if ($Discard) {
-        Write-WinPELog "Abandon des modifications (Discard)" -Level WARN
+        Write-WinPELog "Discarding changes (Discard)" -Level WARN
         Invoke-DISM @('/Unmount-Image', "/MountDir:$MountPath", '/Discard')
     } else {
-        Write-WinPELog "Validation et commit des modifications..." -Level INFO
+        Write-WinPELog "Validating and committing changes..." -Level INFO
         Invoke-DISM @('/Unmount-Image', "/MountDir:$MountPath", '/Commit')
-        Write-WinPELog "WIM sauvegarde avec succes" -Level SUCCESS
+        Write-WinPELog "WIM saved successfully" -Level SUCCESS
     }
 }
 
@@ -758,7 +758,7 @@ function Build-WinPEMedia {
         [string]$ISOFileName    = 'WinPE.iso'
     )
 
-    Write-WinPELog "=== Construction du media WinPE ===" -Level STEP
+    Write-WinPELog "=== Building WinPE media ===" -Level STEP
 
     $makeMedia = Join-Path $script:Config.WinPEAddonPath 'MakeWinPEMedia.cmd'
     if (-not (Test-Path $makeMedia)) {
@@ -848,7 +848,7 @@ function Build-WinPEMedia {
     # -- Mode USB --
     if ($Mode -in 'USB','Both') {
         if (-not $UsbDriveLetter) {
-            throw "Le parametre -UsbDriveLetter est obligatoire pour le mode USB"
+            throw "The -UsbDriveLetter parameter is required for USB mode"
         }
         $driveLetter = $UsbDriveLetter.TrimEnd('\').TrimEnd(':') + ':'
         Write-WinPELog "Preparation cle USB : $driveLetter" -Level WARN
@@ -952,7 +952,7 @@ function Add-WinPEDrivers {
         [switch]$Force
     )
 
-    Write-WinPELog "=== Injection drivers WinPE ===" -Level STEP
+    Write-WinPELog "=== Injecting WinPE drivers ===" -Level STEP
 
     # MODE VRAC : si AllPath est fourni (ou si DriversRoot contient des .inf
     # directement, sans sous-dossiers Net/Storage/Sys), on injecte TOUT le
@@ -1048,10 +1048,10 @@ function Add-WinPEDrivers {
 
     # Avertissements critiques
     if ('Net' -in $skipped) {
-        Write-WinPELog "ATTENTION : pas de drivers Net -- WinPE ne pourra pas acceder aux partages SMB !" -Level WARN
+        Write-WinPELog "WARNING: no Net drivers -- WinPE will not be able to access the SMB shares!" -Level WARN
     }
     if ('Storage' -in $skipped) {
-        Write-WinPELog "ATTENTION : pas de drivers Storage -- disques NVMe/RAID risquent de ne pas etre vus" -Level WARN
+        Write-WinPELog "WARNING: no Storage drivers -- NVMe/RAID disks may not be seen" -Level WARN
     }
 }
 
@@ -1125,7 +1125,7 @@ function Invoke-WinPEBuild {
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Write-WinPELog "+======================================+" -Level STEP
-    Write-WinPELog "|   WINPE-BUILDER -- Demarrage pipeline  |" -Level STEP
+    Write-WinPELog "|   WINPE-BUILDER -- Pipeline start      |" -Level STEP
     Write-WinPELog "+======================================+" -Level STEP
 
     # Lire params reseau depuis PSWinDeploy.psd1 si non fournis explicitement
@@ -1209,8 +1209,8 @@ function Invoke-WinPEBuild {
         }
 
         if (-not $anyDriverInjected) {
-            Write-WinPELog "Aucun driver additionnel injecte -- drivers inbox ADK uniquement" -Level WARN
-            Write-WinPELog "Utiliser -DriversNetPath, -DriversStoragePath, -DriversSysPath ou -DriversPath" -Level INFO
+            Write-WinPELog "No additional driver injected -- ADK inbox drivers only" -Level WARN
+            Write-WinPELog "Use -DriversNetPath, -DriversStoragePath, -DriversSysPath or -DriversPath" -Level INFO
         }
 
         # 4. Personnalisation generale
@@ -1256,11 +1256,11 @@ function Invoke-WinPEBuild {
                 Write-WinPELog "Vault reseau cree et injecte (compte : $ShareUser)" -Level SUCCESS
                 $vaultInjected = $true
             } else {
-                Write-WinPELog "Module NetShare non disponible -- vault reseau non injecte" -Level WARN
+                Write-WinPELog "NetShare module unavailable -- network vault not injected" -Level WARN
             }
         }
         if (-not $vaultInjected) {
-            Write-WinPELog "Aucun vault reseau configure -- utiliser mode Plain ou Prompt au boot" -Level WARN
+            Write-WinPELog "No network vault configured -- use Plain or Prompt mode at boot" -Level WARN
         }
 
         # 6. Demontage + commit
@@ -1280,7 +1280,7 @@ function Invoke-WinPEBuild {
     } catch {
         Write-WinPELog "ERREUR : $_" -Level ERROR
         # Tenter un demontage propre en cas d'erreur
-        Write-WinPELog "Tentative de demontage d'urgence..." -Level WARN
+        Write-WinPELog "Attempting emergency unmount..." -Level WARN
         try {
             Invoke-DISM @('/Unmount-Image', "/MountDir:$(Join-Path $WorkspacePath 'mount')", '/Discard') 2>$null
         } catch {}

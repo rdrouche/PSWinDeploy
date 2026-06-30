@@ -41,7 +41,7 @@ foreach ($root in $searchRoots) {
 $found = $found | Select-Object -Unique
 
 if ($found.Count -eq 0) {
-    Say "Aucune copie trouvee. Verifie le chemin -InstallPath." 'Red'
+    Say "No copy found. Check the -InstallPath path." 'Red'
     return
 }
 

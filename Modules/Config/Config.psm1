@@ -40,7 +40,7 @@ function Get-PSWDVersion {
         }
     }
     # Fallback : derniere version connue figee ici (mise a jour par le bump).
-    $script:CachedVersion = '0.7.0'
+    $script:CachedVersion = '0.8.0'
     return $script:CachedVersion
 }
 
@@ -50,7 +50,7 @@ function Get-PSWDVersion {
 # -----------------------------------------------------------------------------
 
 $script:Defaults = @{
-    Version          = '0.7.0'
+    Version          = '0.8.0'
     ProjectName      = 'PSWinDeploy'
 
     AdkPath          = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
@@ -191,7 +191,7 @@ function Import-PSWinDeployConfig {
         }
     } else {
         $script:ConfigLoadedFrom = 'defaults'
-        Write-Verbose "PSWinDeploy : aucun .psd1 trouve -- valeurs par defaut utilisees"
+        Write-Verbose "PSWinDeploy: no .psd1 found -- using default values"
     }
 
     # Validation architecture (x86 retire depuis ADK 2004)

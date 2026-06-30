@@ -50,7 +50,7 @@ if (-not $WindowsDrive) {
     Say "Auto-detection de la partition Windows..." 'Cyan'
     $found = Find-WindowsVolume
     if ($found.Count -eq 0) {
-        Write-Host "ERREUR : aucune partition Windows trouvee (pas de ntoskrnl.exe)." -ForegroundColor Red
+        Write-Host "ERROR: no Windows partition found (no ntoskrnl.exe)." -ForegroundColor Red
         Write-Host "Le VHDX est-il bien monte ? (Mount-VHD -Path ...)" -ForegroundColor Yellow
         Write-Host "Verifie : Get-Volume  doit lister les lettres du VHDX." -ForegroundColor Yellow
         return
@@ -93,7 +93,7 @@ foreach ($k in $inv.Keys) {
 }
 Say ""
 Say "  INTERPRETATION :" 'Yellow'
-Say "  - WinSxS ABSENT -> l'image WIM ne s'est pas appliquee (probleme dism/disque)" 'DarkGray'
+Say "  - WinSxS MISSING -> the WIM image was not applied (dism/disk issue)" 'DarkGray'
 Say "  - Panther ABSENT -> Windows Setup n'a jamais demarre (crash TRES precoce, AVANT config)" 'DarkGray'
 Say "  - Panther PRESENT -> lire setuperr.log (probleme dans la config unattend)" 'DarkGray'
 Say "  - Users ABSENT mais Panther present -> crash pendant specialize/oobe" 'DarkGray'
@@ -198,4 +198,4 @@ try {
 
 Say ""
 Say ">> A LIRE EN PRIORITE : setuperr.log et UnattendGC\setuperr.log" 'Yellow'
-Say "   Ils indiquent souvent EXACTEMENT le parametre/composant qui a echoue." 'Yellow'
+Say "   They often show EXACTLY which setting/component failed." 'Yellow'

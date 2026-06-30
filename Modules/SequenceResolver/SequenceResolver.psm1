@@ -82,7 +82,7 @@ function Resolve-DeploySequence {
     }
 
     if (-not $found) {
-        Write-Host "Aucune sequence resolue (by-name/by-mac/_default)." -ForegroundColor Yellow
+        Write-Host "No sequence resolved (by-name/by-mac/_default)." -ForegroundColor Yellow
         return $null
     }
 

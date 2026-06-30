@@ -296,7 +296,7 @@ foreach ($cfgPath in $cfgPaths) {
 Clear-Host
 Write-Header "PSWinDeploy -- Export WIM"
 Write-Info "Extrait une edition Windows depuis un ISO ou WIM source."
-Write-Info "Produit un fichier .wim optimise pret pour le deploiement."
+Write-Info "Produces an optimized .wim file ready for deployment."
 Write-Host ""
 Write-Host "  ISO Windows --> plusieurs editions --> WIM unique par edition" -ForegroundColor Gray
 Write-Host "  Avantages : WIM plus petit, index unique, DISM plus rapide." -ForegroundColor Gray
@@ -306,7 +306,7 @@ Write-Host ""
 # ETAPE 1 : SOURCE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 1 -- Source"
+Write-Header "Step 1 -- Source"
 
 $wimSourcePath = $null
 $isoWasMounted = $false
@@ -321,7 +321,7 @@ if ($SourceWIM) {
 
 } else {
     # Choix interactif
-    Write-Host "  [?]  Source : [1] Monter un ISO  [2] Fichier WIM/ESD existant : " -ForegroundColor White -NoNewline
+    Write-Host "  [?]  Source: [1] Mount an ISO  [2] Existing WIM/ESD file: " -ForegroundColor White -NoNewline
     $choice = (Read-Host).Trim().Trim('"').Trim("'").Trim()
 
     if ($choice -eq '2') {
@@ -387,7 +387,7 @@ if ($SourceISO -and -not $wimSourcePath) {
     }
     if (-not $wimSourcePath) {
         Dismount-DiskImage -ImagePath $SourceISO | Out-Null
-        throw "Aucun install.wim/install.esd dans l'ISO."
+        throw "No install.wim/install.esd in the ISO."
     }
     Write-OK "Image trouvee : $wimSourcePath"
 }
@@ -396,7 +396,7 @@ if ($SourceISO -and -not $wimSourcePath) {
 # ETAPE 2 : EDITIONS
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 2 -- Editions disponibles"
+Write-Header "Step 2 -- Available editions"
 Write-Step "Lecture via DISM..."
 
 $wimInfo    = @(Get-WIMEditions -WimPath $wimSourcePath)
@@ -472,7 +472,7 @@ if ($AllEditions) {
 # ETAPE 4 : DESTINATION
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 4 -- Destination"
+Write-Header "Step 4 -- Destination"
 
 if (-not $OutputPath) {
     if ($configImageShare) {
@@ -506,7 +506,7 @@ if (-not $OutputName -and $indicesToExport.Count -eq 1) {
     $imgForName = $wimInfo | Where-Object { $_.Index -eq $indicesToExport[0] } | Select-Object -First 1
     $defaultName = Get-CleanFileName -ImageName $imgForName.Name -Language $imgForName.Language -Build $imgForName.Build
     Write-Host ""
-    Write-Host "  Nom de fichier propose : " -ForegroundColor White -NoNewline
+    Write-Host "  Suggested file name: " -ForegroundColor White -NoNewline
     Write-Host $defaultName -ForegroundColor Cyan
     Write-Host "  [?]  Entree pour accepter, ou tapez un autre nom (sans accent) : " -ForegroundColor White -NoNewline
     $nameInput = (Read-Host).Trim().Trim('"').Trim("'").Trim()
@@ -539,7 +539,7 @@ if (-not $OutputName -and $indicesToExport.Count -eq 1) {
 # ETAPE 5 : EXPORT
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 5 -- Export DISM"
+Write-Header "Step 5 -- DISM export"
 $exportedFiles = @()
 
 foreach ($idx in $indicesToExport) {
@@ -602,7 +602,7 @@ foreach ($idx in $indicesToExport) {
 # ---------------------------------------------------------------------------
 
 if ($isoWasMounted -and -not $KeepISOMounted) {
-    Write-Step "Demontage ISO..."
+    Write-Step "Unmounting ISO..."
     Dismount-DiskImage -ImagePath $SourceISO | Out-Null
     Write-OK "ISO demonte"
 }
@@ -614,7 +614,7 @@ if ($isoWasMounted -and -not $KeepISOMounted) {
 Write-Header "Resultat"
 
 if ($exportedFiles.Count -eq 0) {
-    Write-Warn "Aucun fichier exporte."
+    Write-Warn "No file exported."
 } else {
     Write-OK "$($exportedFiles.Count) fichier(s) WIM prets pour PSWinDeploy :"
     foreach ($ef in $exportedFiles) {

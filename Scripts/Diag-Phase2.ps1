@@ -72,7 +72,7 @@ if (Test-Path $sdp) {
 }
 Say ""
 Say "===== FIN DIAGNOSTIC =====" 'Cyan'
-Say "Envoie cette sortie pour localiser le maillon manquant." 'Yellow'
+Say "Send this output to locate the missing link." 'Yellow'
 
 # ===== AJOUT : verification des fichiers de config sur la cible (phase 2) =====
 Write-Host ""

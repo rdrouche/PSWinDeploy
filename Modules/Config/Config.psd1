@@ -1,5 +1,5 @@
 ﻿@{
-    ModuleVersion     = '0.7.0'
+    ModuleVersion     = '0.8.0'
     GUID              = 'a1b2c3d4-0006-0006-0006-000000000006'
     Author            = 'PSWinDeploy'
     Description       = 'Chargeur de configuration central PSWinDeploy'

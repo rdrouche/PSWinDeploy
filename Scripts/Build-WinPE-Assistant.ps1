@@ -58,7 +58,7 @@ function Read-Answer {
     $a = Read-Host
     if ([string]::IsNullOrWhiteSpace($a)) {
         if ($Default) { return $Default }
-        if ($Required) { Write-Warn "Valeur obligatoire."; return Read-Answer @PSBoundParameters }
+        if ($Required) { Write-Warn "Value required."; return Read-Answer @PSBoundParameters }
         return ''
     }
     return $a.Trim()
@@ -79,12 +79,12 @@ function Read-MultiChoice {
         $sel = if ($Options[$i] -in $Defaults) { '[X]' } else { '[ ]' }
         Write-Host "       [$($i+1)] $sel $($Options[$i])" -ForegroundColor Gray
     }
-    Write-Host "       [0] Valider" -ForegroundColor DarkGray
+    Write-Host "       [0] Confirm" -ForegroundColor DarkGray
     $selected = [System.Collections.Generic.List[string]]::new()
     foreach ($d in $Defaults) { $selected.Add($d) }
     $editing = $true
     while ($editing) {
-        Write-Host "  [?]  Numero a cocher/decocher (0=valider) : " -ForegroundColor White -NoNewline
+        Write-Host "  [?]  Number to check/uncheck (0=confirm): " -ForegroundColor White -NoNewline
         $inp = (Read-Host).Trim().Trim('"').Trim("'").Trim()
         if ($inp -eq '0' -or [string]::IsNullOrWhiteSpace($inp)) { $editing=$false }
         elseif ($inp -match '^\d+$' -and [int]$inp -ge 1 -and [int]$inp -le $Options.Count) {
@@ -162,7 +162,7 @@ foreach ($mod in @('Config','WinPE-Builder')) {
 Clear-Host
 Write-Host ""
 Write-Host "  ==========================================================" -ForegroundColor Cyan
-Write-Host "     PSWinDeploy -- Assistant de construction WinPE         " -ForegroundColor Cyan
+Write-Host "     PSWinDeploy -- WinPE build assistant                  " -ForegroundColor Cyan
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -174,18 +174,18 @@ Write-Host ""
 # Ideal pour reconstruire vite un WinPE sans tout reparametrer.
 if (-not $Unattended -and -not $QuickMode) {
     Write-Host "  Mode de construction :" -ForegroundColor White
-    Write-Host "    [1] RAPIDE        -- valeurs par defaut, aucune question (recommande)" -ForegroundColor Green
-    Write-Host "    [2] PERSONNALISE  -- choisir chaque option pas a pas" -ForegroundColor Yellow
+    Write-Host "    [1] QUICK         -- default values, no questions (recommended)" -ForegroundColor Green
+    Write-Host "    [2] CUSTOM        -- choose each option step by step" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  [?]  Votre choix [1] : " -ForegroundColor White -NoNewline
     $modeChoice = (Read-Host).Trim()
     if ($modeChoice -ne '2') {
         $QuickMode = $true
         Write-Host ""
-        Write-OK "Mode RAPIDE : construction avec les valeurs par defaut"
+        Write-OK "QUICK mode: build with default values"
     } else {
         Write-Host ""
-        Write-Info "Mode PERSONNALISE : chaque option sera demandee"
+        Write-Info "CUSTOM mode: each option will be asked"
     }
 }
 # En mode rapide, on se comporte comme Unattended pour les questions tout en
@@ -196,7 +196,7 @@ $useDefaults = $Unattended -or $QuickMode
 # ETAPE 1 : VERIFICATION ADK
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 1 -- Verification ADK"
+Write-Header "Step 1 -- ADK check"
 
 $adkRoot  = $cfg.AdkPath
 $wpeRoot  = $cfg.WinPEAddonPath
@@ -211,26 +211,26 @@ if ($adkOk) {
     Write-OK "ADK detecte : $adkRoot"
     Write-OK "WinPE Add-on : $wpeRoot"
 } else {
-    Write-Err "ADK ou WinPE Add-on non detecte !"
+    Write-Err "ADK or WinPE Add-on not detected!"
     Write-Warn "Telecharger : https://learn.microsoft.com/windows-hardware/get-started/adk-install"
     Write-Warn "  1. Windows ADK (cocher 'Deployment Tools')"
     Write-Warn "  2. WinPE Add-on (tout cocher)"
-    if (-not (Read-YesNo "Continuer quand meme (chemin ADK different) ?" $false)) { exit 1 }
+    if (-not (Read-YesNo "Continue anyway (different ADK path)?" $false)) { exit 1 }
     $adkRoot = Read-Answer "Chemin ADK" -Required
     $wpeRoot = Read-Answer "Chemin WinPE Add-on" -Required
     $copype  = Join-Path $wpeRoot 'copype.cmd'
 }
 
-if ($dismOk) { Write-OK "DISM disponible" }
-else         { Write-Warn "DISM non trouve -- utilisation du DISM systeme" }
+if ($dismOk) { Write-OK "DISM available" }
+else         { Write-Warn "DISM not found -- using the system DISM" }
 
 # ---------------------------------------------------------------------------
 # ETAPE 2 : ARCHITECTURE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 2 -- Architecture"
+Write-Header "Step 2 -- Architecture"
 
-Write-Info "Architectures supportees depuis ADK 2004 :"
+Write-Info "Architectures supported since ADK 2004:"
 Write-Host "    amd64 : x64 standard -- la quasi-totalite des PC/serveurs" -ForegroundColor Gray
 Write-Host "    arm64 : Surface Pro X, Copilot+ PC, serveurs ARM" -ForegroundColor Gray
 Write-Host "    x86   : RETIRE depuis ADK 2004 -- non supporte" -ForegroundColor DarkGray
@@ -254,16 +254,16 @@ $archPath = Join-Path $wpeRoot $arch
 if (-not (Test-Path $archPath)) {
     Write-Err "Dossier $arch introuvable dans l'ADK : $archPath"
     Write-Warn "Verifier que le WinPE Add-on est bien installe pour l'architecture $arch"
-    if (-not (Read-YesNo "Continuer quand meme ?" $false)) { exit 1 }
+    if (-not (Read-YesNo "Continue anyway?" $false)) { exit 1 }
 }
 
 # ---------------------------------------------------------------------------
 # ETAPE 3 : PACKAGES WINPE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 3 -- Packages WinPE"
+Write-Header "Step 3 -- WinPE packages"
 
-Write-Info "Les packages ajoutent des fonctionnalites a WinPE (augmentent la taille du WIM)."
+Write-Info "Packages add features to WinPE (they increase the WIM size)."
 Write-Host ""
 
 $allPackages = @(
@@ -292,7 +292,7 @@ $packageDescs = @{
 
 $defaultPkgs = @('PowerShell','WMI','NetFx','Scripting','StorageWMI','EnhancedStorage')
 
-Write-Info "Packages disponibles :"
+Write-Info "Available packages:"
 foreach ($p in $allPackages) {
     $isDefault = if ($p -in $defaultPkgs) { ' [defaut]' } else { '' }
     Write-Host ("    {0,-20} {1}{2}" -f $p, $packageDescs[$p], $isDefault) -ForegroundColor Gray
@@ -302,7 +302,7 @@ Write-Host ""
 $selectedPkgs = if ($useDefaults) {
     if ($cfg.WinPEPackages) { @($cfg.WinPEPackages) } else { $defaultPkgs }
 } else {
-    Read-MultiChoice "Packages a inclure (cocher/decocher)" `
+    Read-MultiChoice "Packages to include (check/uncheck)" `
         -Options $allPackages -Defaults $defaultPkgs
 }
 
@@ -312,19 +312,19 @@ Write-OK "Packages : $($selectedPkgs -join ', ')"
 # ETAPE 4 : DRIVERS
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 4 -- Drivers WinPE"
+Write-Header "Step 4 -- WinPE drivers"
 
-Write-Info "WinPE inclut deja beaucoup de drivers Microsoft (inbox)."
-Write-Info "Ajouter seulement ce qui manque pour vos machines."
+Write-Info "WinPE already includes many Microsoft drivers (inbox)."
+Write-Info "Add only what is missing for your machines."
 Write-Host ""
-Write-Host "    Net     : drivers NIC (Intel I219/I225, Realtek 8125...)" -ForegroundColor Gray
-Write-Host "              CRITIQUE -- sans NIC, WinPE ne voit pas le reseau" -ForegroundColor DarkGray
+Write-Host "    Net     : NIC drivers (Intel I219/I225, Realtek 8125...)" -ForegroundColor Gray
+Write-Host "              CRITICAL -- without NIC, WinPE cannot see the network" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "    Storage : drivers disques (NVMe Samsung, Intel RST, AMD RAID...)" -ForegroundColor Gray
-Write-Host "              CRITIQUE -- sans Storage, WinPE ne voit pas les disques" -ForegroundColor DarkGray
+Write-Host "    Storage : disk drivers (NVMe Samsung, Intel RST, AMD RAID...)" -ForegroundColor Gray
+Write-Host "              CRITICAL -- without Storage, WinPE cannot see the disks" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "    Sys     : drivers systeme (chipset Intel/AMD, USB 3.x...)" -ForegroundColor Gray
-Write-Host "              Optionnel mais recommande" -ForegroundColor DarkGray
+Write-Host "    Sys     : system drivers (Intel/AMD chipset, USB 3.x...)" -ForegroundColor Gray
+Write-Host "              Optional but recommended" -ForegroundColor DarkGray
 Write-Host ""
 
 $driverBase = $cfg.DriverShare
@@ -368,7 +368,7 @@ foreach ($entry in @(
         (@(Get-ChildItem $entry.Path -Filter '*.inf' -Recurse -ErrorAction SilentlyContinue)).Count
     } else { 0 }
     $status = if ($exists -and $count -gt 0) { "[OK] $count driver(s) .inf" }
-              elseif ($exists)               { "[!]  Dossier vide -- aucun driver sera injecte" }
+              elseif ($exists)               { "[!]  Empty folder -- no driver will be injected" }
               else                           { "[~]  Inaccessible -- sera ignore au build" }
     $col = if ($exists -and $count -gt 0) { 'Green' } elseif ($exists) { 'Yellow' } else { 'Cyan' }
     Write-Host "    $($entry.Cat,-10) $status  ($($entry.Path))" -ForegroundColor $col
@@ -379,10 +379,10 @@ Write-Host ""
 # ETAPE 5 : RESEAU (credentials partage)
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 5 -- Acces reseau depuis WinPE"
+Write-Header "Step 5 -- Network access from WinPE"
 
-Write-Info "WinPE a besoin de credentials pour acceder aux partages SMB."
-Write-Info "Ces credentials seront stockes dans le vault et injectes dans l'ISO."
+Write-Info "WinPE needs credentials to access the SMB shares."
+Write-Info "These credentials will be stored in the vault and injected into the ISO."
 Write-Host ""
 
 $shareUser = $cfg.WinPEShareUser
@@ -392,13 +392,13 @@ $vaultPass = ''
 if ($shareUser) {
     Write-OK "Compte configure dans PSWinDeploy.psd1 : $shareUser"
     if (-not $useDefaults) {
-        if (Read-YesNo "Modifier les credentials ?" $false) {
-            $shareUser = Read-Answer "Compte reseau WinPE (ex: SERVEUR\svc-winpe)" -Default $shareUser
+        if (Read-YesNo "Change the credentials?" $false) {
+            $shareUser = Read-Answer "WinPE network account (e.g. SERVER\svc-winpe)" -Default $shareUser
         }
     }
 } else {
-    Write-Warn "Aucun compte reseau configure dans PSWinDeploy.psd1"
-    $shareUser = Read-Answer "Compte reseau WinPE (ex: SERVEUR\svc-winpe)" -Required
+    Write-Warn "No network account configured in PSWinDeploy.psd1"
+    $shareUser = Read-Answer "WinPE network account (e.g. SERVER\svc-winpe)" -Required
 }
 
 # Essayer de lire le mot de passe depuis le vault existant (PSD1 plat ou JSON legacy)
@@ -429,7 +429,7 @@ foreach ($vc in $vaultCandidates) {
 if ($existingVaultPath) {
     Write-OK "Vault serveur trouve : $existingVaultPath"
 } else {
-    Write-Warn "AUCUN vault serveur trouve. Cherche dans :"
+    Write-Warn "NO server vault found. Searched in:"
     foreach ($vc in $vaultCandidates) { Write-Host "      - $vc" -ForegroundColor DarkGray }
 }
 if ($existingVaultPath) {
@@ -448,7 +448,7 @@ if ($existingVaultPath) {
             if ($vd.method -eq 'Plain') {
                 $vsj = $vd.data | ConvertFrom-Json
                 $sharePass = if ($vsj.winpePassword) { $vsj.winpePassword } elseif ($vsj.sharePassword) { $vsj.sharePassword }
-                if ($sharePass) { Write-OK "Mot de passe WinPE lu depuis le vault JSON" }
+                if ($sharePass) { Write-OK "WinPE password read from the JSON vault" }
             }
         }
     } catch { Write-Warn "Lecture vault existant : $_" }
@@ -460,7 +460,7 @@ if (-not $sharePass) {
     $sharePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp))
 } else {
-    if (-not (Read-YesNo "Utiliser le mot de passe existant du vault ?" $true)) {
+    if (-not (Read-YesNo "Use the existing vault password?" $true)) {
         Write-Host "  [?]  Nouveau mot de passe pour $shareUser : " -ForegroundColor White -NoNewline
         $sp = Read-Host -AsSecureString
         $sharePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
@@ -472,8 +472,8 @@ if (-not $sharePass) {
 # le vault est dans le WIM/ISO, protege par les droits d acces reseau + physique
 $vaultMode = Read-Answer "Chiffrement vault (AES/Plain)" -Default 'Plain'
 if ($vaultMode -eq 'Plain') {
-    Write-Info "Mode Plain : credentials dans le WIM (protege par acces physique/reseau)"
-    Write-Info "Equivalent MDT Bootstrap.ini -- adapte pour environnement multi-operateurs"
+    Write-Info "Plain mode: credentials in the WIM (protected by physical/network access)"
+    Write-Info "MDT Bootstrap.ini equivalent -- suited for multi-operator environments"
 }
 if ($vaultMode -eq 'AES') {
     Write-Host "  [?]  Mot de passe vault AES : " -ForegroundColor White -NoNewline
@@ -486,18 +486,18 @@ if ($vaultMode -eq 'AES') {
 # ETAPE 6 : CUSTOMISATION
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 6 -- Customisation WinPE"
+Write-Header "Step 6 -- WinPE customization"
 
 $locale   = Read-Answer "Locale WinPE" -Default $(if ($cfg.WinPELocale) { $cfg.WinPELocale } else { 'fr-FR' })
 $timezone = Read-Answer "Fuseau horaire" -Default 'Romance Standard Time'
 
 Write-Host ""
 Write-Info "Commandes supplementaires dans startnet.cmd :"
-Write-Info "PSWinDeploy ajoute automatiquement wpeinit et Start-Deploy.ps1"
+Write-Info "PSWinDeploy automatically adds wpeinit and Start-Deploy.ps1"
 $extraCmds = @()
 if (-not $useDefaults) {
-    if (Read-YesNo "Ajouter des commandes personnalisees dans startnet.cmd ?" $false) {
-        Write-Host "  Saisir les commandes une par une (vide pour terminer) :" -ForegroundColor Gray
+    if (Read-YesNo "Add custom commands to startnet.cmd?" $false) {
+        Write-Host "  Enter commands one by one (empty to finish):" -ForegroundColor Gray
         while ($true) {
             Write-Host "  > " -ForegroundColor White -NoNewline
             $cmd = (Read-Host).Trim().Trim('"').Trim("'").Trim()
@@ -510,9 +510,9 @@ if (-not $useDefaults) {
 # Fichiers supplementaires a copier dans le WIM
 $extraFiles = @{}
 if (-not $useDefaults) {
-    if (Read-YesNo "Copier des fichiers supplementaires dans le WIM ? (scripts, configs)" $false) {
+    if (Read-YesNo "Copy additional files into the WIM? (scripts, configs)" $false) {
         while ($true) {
-            Write-Host "  Source (vide pour terminer) : " -ForegroundColor White -NoNewline
+            Write-Host "  Source (empty to finish): " -ForegroundColor White -NoNewline
             $src = (Read-Host).Trim().Trim('"').Trim("'").Trim()
             if ([string]::IsNullOrWhiteSpace($src)) { break }
             Write-Host "  Destination dans WIM (ex: Deploy\Scripts) : " -ForegroundColor White -NoNewline
@@ -526,23 +526,23 @@ if (-not $useDefaults) {
 # ETAPE 7 : MEDIAS DE SORTIE
 # ---------------------------------------------------------------------------
 
-Write-Header "Etape 7 -- Medias de sortie"
+Write-Header "Step 7 -- Output media"
 
-Write-Info "Choisir les formats de sortie souhaites :"
+Write-Info "Choose the desired output formats:"
 Write-Host ""
-Write-Host "    ISO     : fichier .iso pour cle USB ou montage VM" -ForegroundColor Gray
-Write-Host "    USB     : cle USB bootable (la cle sera FORMATEE)" -ForegroundColor Gray
-Write-Host "    WIM PXE : boot.wim pour WDS/PXE (boot reseau)" -ForegroundColor Yellow
+Write-Host "    ISO     : .iso file for USB key or VM mounting" -ForegroundColor Gray
+Write-Host "    USB     : bootable USB key (the key will be FORMATTED)" -ForegroundColor Gray
+Write-Host "    WIM PXE : boot.wim for WDS/PXE (network boot)" -ForegroundColor Yellow
 Write-Host ""
 
-$buildISO   = if ($useDefaults) { $true  } else { Read-YesNo "Generer un ISO ?" $true }
-$buildUSB   = if ($useDefaults) { $false } else { Read-YesNo "Creer une cle USB bootable ?" $false }
-$buildPXE   = if ($useDefaults) { $true  } else { Read-YesNo "Generer un boot.wim pour WDS/PXE ?" $true }
+$buildISO   = if ($useDefaults) { $true  } else { Read-YesNo "Generate an ISO?" $true }
+$buildUSB   = if ($useDefaults) { $false } else { Read-YesNo "Create a bootable USB key?" $false }
+$buildPXE   = if ($useDefaults) { $true  } else { Read-YesNo "Generate a boot.wim for WDS/PXE?" $true }
 
 $usbDrive = ''
 if ($buildUSB) {
     Write-Host ""
-    Write-Warn "La cle USB choisie sera ENTIEREMENT FORMATEE !"
+    Write-Warn "The selected USB key will be ENTIRELY FORMATTED!"
     # Lister les lecteurs USB
     $usbDrives = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' } | ForEach-Object {
         $vols = Get-Partition -DiskNumber $_.Number -ErrorAction SilentlyContinue |
@@ -552,7 +552,7 @@ if ($buildUSB) {
     }
 )
     if ($usbDrives.Count -gt 0) {
-        Write-Info "Cles USB detectees :"
+        Write-Info "USB keys detected:"
         foreach ($d in $usbDrives) {
             $letter = if ($d.Letter) { "$($d.Letter):" } else { '(non monte)' }
             Write-Host "    $letter  $($d.Name)  $($d.Size)" -ForegroundColor Gray
@@ -563,8 +563,8 @@ if ($buildUSB) {
 }
 
 # Chemins de sortie
-$workspacePath = Read-Answer "Dossier workspace WinPE" -Default $(if ($cfg.WinPEWorkspace) { $cfg.WinPEWorkspace } else { 'C:\WinPE-Work' })
-$outputPath    = Read-Answer "Dossier de sortie (ISO / WIM)" -Default $(if ($cfg.WinPEOutputPath) { $cfg.WinPEOutputPath } else { 'C:\WinPE-ISO' })
+$workspacePath = Read-Answer "WinPE workspace folder" -Default $(if ($cfg.WinPEWorkspace) { $cfg.WinPEWorkspace } else { 'C:\WinPE-Work' })
+$outputPath    = Read-Answer "Output folder (ISO / WIM)" -Default $(if ($cfg.WinPEOutputPath) { $cfg.WinPEOutputPath } else { 'C:\WinPE-ISO' })
 
 # ---------------------------------------------------------------------------
 # ETAPE 8 : CONFIGURATION WDS (si demande et disponible)
@@ -573,7 +573,7 @@ $outputPath    = Read-Answer "Dossier de sortie (ISO / WIM)" -Default $(if ($cfg
 $wdsConfig = $null
 
 if ($buildPXE) {
-    Write-Header "Etape 8 -- Configuration WDS"
+    Write-Header "Step 8 -- WDS configuration"
 
     $wdsAvailable = $false
     try {
@@ -586,19 +586,19 @@ if ($buildPXE) {
     } catch {}
 
     if (-not $wdsAvailable) {
-        Write-Info "Service WDS (WDSServer) non detecte sur ce serveur."
-        Write-Info "Le boot.wim sera genere -- vous pourrez l'importer manuellement dans WDS."
+        Write-Info "WDS service (WDSServer) not detected on this server."
+        Write-Info "The boot.wim will be generated -- you can import it manually into WDS."
         Write-Host ""
         Write-Info "Pour installer WDS :"
         Write-Host "    Install-WindowsFeature WDS -IncludeManagementTools" -ForegroundColor Gray
         Write-Host "    wdsutil /initialize-server /remInst:D:\RemoteInstall" -ForegroundColor Gray
     } else {
-        if (Read-YesNo "Configurer WDS automatiquement avec le boot.wim genere ?" $true) {
+        if (Read-YesNo "Configure WDS automatically with the generated boot.wim?" $true) {
             $wdsConfig = @{
                 Configure   = $true
                 RemInstPath = Read-Answer "Chemin RemoteInstall WDS" -Default 'D:\RemoteInstall'
-                BootImageName = Read-Answer "Nom image boot WDS" -Default 'PSWinDeploy WinPE'
-                StartService  = Read-YesNo "Redemarrer le service WDS apres configuration ?" $true
+                BootImageName = Read-Answer "WDS boot image name" -Default 'PSWinDeploy WinPE'
+                StartService  = Read-YesNo "Restart the WDS service after configuration?" $true
             }
             Write-OK "WDS sera configure automatiquement"
         }
@@ -625,7 +625,7 @@ Write-Host ""
 Write-Host "  Workspace       : $workspacePath" -ForegroundColor White
 Write-Host "  Sortie          : $outputPath" -ForegroundColor White
 Write-Host ""
-Write-Host "  Medias          : " -NoNewline -ForegroundColor White
+Write-Host "  Media           : " -NoNewline -ForegroundColor White
 $medias = @()
 if ($buildISO) { $medias += 'ISO' }
 if ($buildUSB) { $medias += "USB ($usbDrive)" }
@@ -636,8 +636,8 @@ if ($wdsConfig) {
 }
 Write-Host ""
 
-if (-not (Read-YesNo "Lancer le build ?" $true)) {
-    Write-Warn "Build annule."
+if (-not (Read-YesNo "Start the build?" $true)) {
+    Write-Warn "Build cancelled."
     exit 0
 }
 
@@ -667,20 +667,20 @@ Set-WinPEConfig -AdkPath $adkRoot `
     -Locale $locale
 
 # -- Creer le vault WinPE avec les credentials reseau
-Write-Step "Creation du vault reseau WinPE..."
+Write-Step "Creating the WinPE network vault..."
 if (-not (Test-Path $outputPath)) { New-Item -ItemType Directory $outputPath -Force | Out-Null }
 $vaultTmpDir = Join-Path $env:TEMP "pswpe-vault-$(Get-Date -Format 'yyyyMMddHHmmss')"
 New-Item -ItemType Directory $vaultTmpDir -Force | Out-Null
 
 # Garde-fou : le mot de passe ne doit jamais etre vide
 if ([string]::IsNullOrWhiteSpace($sharePass)) {
-    Write-Warn "Mot de passe WinPE vide -- saisie obligatoire"
+    Write-Warn "Empty WinPE password -- entry required"
     Write-Host "  [?]  Mot de passe pour $shareUser : " -ForegroundColor White -NoNewline
     $sp = Read-Host -AsSecureString
     $sharePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp))
     if ([string]::IsNullOrWhiteSpace($sharePass)) {
-        throw "Mot de passe WinPE obligatoire pour creer le vault reseau."
+        throw "WinPE password required to create the network vault."
     }
 }
 
@@ -710,16 +710,16 @@ if ($existingVaultPath -and (Test-Path $existingVaultPath -EA SilentlyContinue))
             if ($val) { $extraSecrets[$k] = $val }
         }
         if ($extraSecrets.ContainsKey('localAdminPassword')) {
-            Write-OK "localAdminPassword reporte depuis le vault serveur vers le WIM"
+            Write-OK "localAdminPassword carried over from the server vault into the WIM"
         } else {
             Write-Warn "localAdminPassword ABSENT du vault serveur ($existingVaultPath)"
-            Write-Warn "=> le mot de passe admin local sera le defaut. Ajoute la cle au vault serveur."
+            Write-Warn "=> the local admin password will be the default. Add the key to the server vault."
         }
     } catch {
         Write-Warn "Lecture du vault serveur pour localAdminPassword echouee : $_"
     }
 } else {
-    Write-Warn "Pas de vault serveur trouve -- localAdminPassword non reporte (defaut utilise)."
+    Write-Warn "No server vault found -- localAdminPassword not carried over (default used)."
 }
 if ($extraSecrets.Count -gt 0) { $vaultArgs.AdditionalSecrets = $extraSecrets }
 
@@ -727,7 +727,7 @@ if (Get-Command New-WinPEShareVault -ErrorAction SilentlyContinue) {
     $vaultFile = New-WinPEShareVault @vaultArgs
     Write-OK "Vault WinPE cree : $vaultFile"
 } else {
-    Write-Warn "Fonction New-WinPEShareVault non disponible -- vault non genere"
+    Write-Warn "New-WinPEShareVault function unavailable -- vault not generated"
     $vaultFile = $null
 }
 
@@ -807,7 +807,7 @@ if ($configFile -and (Test-Path $configFile)) {
     $filesToCopy[$configFile] = 'Deploy'
     Write-OK "Config PSWinDeploy.psd1 embarquee dans le WIM : $configFile"
 } else {
-    Write-Warn "PSWinDeploy.psd1 introuvable -- la config ne sera pas embarquee !"
+    Write-Warn "PSWinDeploy.psd1 not found -- the config will not be embedded!"
 }
 # Copier les modules Deploy dans le WIM
 $deployModules = Join-Path (Split-Path $scriptDir -Parent) 'Modules'
@@ -845,12 +845,12 @@ if ((Test-Path $netPath -EA SilentlyContinue) -or
 
 $buildResult = Invoke-WinPEBuild @buildArgs
 
-Write-OK "Build principal termine"
+Write-OK "Main build complete"
 
 # -- Generer le WIM PXE/WDS si demande
 $pxeWimPath = $null
 if ($buildPXE) {
-    Write-Step "Generation du boot.wim pour PXE/WDS..."
+    Write-Step "Generating boot.wim for PXE/WDS..."
     $pxeDir = Join-Path $outputPath 'PXE'
     if (-not (Test-Path $pxeDir)) { New-Item -ItemType Directory $pxeDir -Force | Out-Null }
     $pxeWimPath = Join-Path $pxeDir "boot-$arch.wim"
@@ -898,7 +898,7 @@ if ($buildPXE -and $pxeWimPath -and $wdsConfig -and $wdsConfig.Configure) {
             Write-OK "Image importee dans WDS : $($wdsConfig.BootImageName)"
         } else {
             Write-Warn "wdsutil : $($wdsOut | Select-Object -Last 3 | Out-String)"
-            Write-Warn "Importer manuellement via la console WDS ou wdsutil /add-image"
+            Write-Warn "Import manually via the WDS console or wdsutil /add-image"
         }
     } catch {
         Write-Warn "wdsutil non disponible : $_"
@@ -910,7 +910,7 @@ if ($buildPXE -and $pxeWimPath -and $wdsConfig -and $wdsConfig.Configure) {
     if ($wdsConfig.StartService) {
         try {
             Restart-Service WDSServer -Force
-            Write-OK "Service WDS redemarre"
+            Write-OK "WDS service restarted"
         } catch {
             Write-Warn "Impossible de redemarrer WDS : $_"
         }
@@ -925,11 +925,11 @@ Remove-Item $vaultTmpDir -Recurse -Force -ErrorAction SilentlyContinue
 # ---------------------------------------------------------------------------
 
 $sw.Stop()
-Write-Header "Build termine"
+Write-Header "Build complete"
 
 Write-Host "  Duree totale : $([Math]::Round($sw.Elapsed.TotalMinutes,1)) min" -ForegroundColor White
 Write-Host ""
-Write-Host "  Fichiers produits :" -ForegroundColor White
+Write-Host "  Files produced:" -ForegroundColor White
 Write-Host ""
 
 $isoPath = Join-Path $outputPath "WinPE-$arch.iso"
@@ -937,7 +937,7 @@ if (Test-Path $isoPath) {
     $sz = Format-Size (Get-Item $isoPath).Length
     Write-Host "    ISO     : $isoPath  ($sz)" -ForegroundColor Green
 } else {
-    Write-Host "    ISO     : non genere" -ForegroundColor DarkGray
+    Write-Host "    ISO     : not generated" -ForegroundColor DarkGray
 }
 
 if ($buildUSB -and $usbDrive) {
@@ -954,23 +954,23 @@ Write-Host "  Utilisation :" -ForegroundColor White
 Write-Host ""
 
 if (Test-Path $isoPath) {
-    Write-Host "    ISO  --> Graver sur USB avec Rufus ou monter dans VM" -ForegroundColor Gray
+    Write-Host "    ISO  --> Burn to USB with Rufus or mount in a VM" -ForegroundColor Gray
 }
 if ($pxeWimPath -and (Test-Path $pxeWimPath)) {
     Write-Host "    WIM PXE :" -ForegroundColor Gray
     if (-not $wdsConfig) {
-        Write-Host "      Copier dans RemoteInstall de WDS :" -ForegroundColor Gray
+        Write-Host "      Copy into the WDS RemoteInstall folder:" -ForegroundColor Gray
         Write-Host "        wdsutil /add-image /imagefile:$pxeWimPath /imagetype:boot" -ForegroundColor Cyan
-        Write-Host "      Ou via la console WDS : Clic-droit Images de boot > Ajouter" -ForegroundColor Gray
+        Write-Host "      Or via the WDS console: right-click Boot Images > Add" -ForegroundColor Gray
     } else {
         Write-Host "      Image importee dans WDS : $($wdsConfig.BootImageName)" -ForegroundColor Green
-        Write-Host "      Configurer la politique de reponse WDS si pas deja fait" -ForegroundColor Gray
+        Write-Host "      Configure the WDS answer policy if not already done" -ForegroundColor Gray
     }
 }
 
 Write-Host ""
 Write-Host "  Notes WDS/PXE :" -ForegroundColor Cyan
-Write-Host "    - Configurer DHCP option 66 (nom serveur WDS) et 67 (pxeboot.n12)" -ForegroundColor Gray
-Write-Host "    - Ou DHCP option 60 (PXEClient) selon votre serveur DHCP" -ForegroundColor Gray
+Write-Host "    - Configure DHCP option 66 (WDS server name) and 67 (pxeboot.n12)" -ForegroundColor Gray
+Write-Host "    - Or DHCP option 60 (PXEClient) depending on your DHCP server" -ForegroundColor Gray
 Write-Host "    - Le serveur WDS doit repondre aux clients PXE (wdsutil /set-server /answerclientson)" -ForegroundColor Gray
 Write-Host ""

@@ -159,7 +159,7 @@ function Resolve-ShareCredential {
         'Plain' {
             if (-not $Username -or -not $Password) { throw "Mode Plain : -Username et -Password obligatoires" }
             Write-NSLog "Mode Plain : $Username" -Level WARN
-            Write-NSLog "Conseil : utiliser le mode Vault en production" -Level WARN
+            Write-NSLog "Tip: use Vault mode in production" -Level WARN
             return @{ Username = $Username; Password = $Password }
         }
         'Vault' {
@@ -174,7 +174,7 @@ function Resolve-ShareCredential {
         }
         'Prompt' {
             Write-Host ""
-            Write-Host "  Connexion partage reseau de deploiement" -ForegroundColor Yellow
+            Write-Host "  Connecting deployment network share" -ForegroundColor Yellow
             Write-Host "  Compte (ex: SERVEUR\svc-winpe) : " -ForegroundColor Cyan -NoNewline
             $u  = Read-Host
             $sp = Read-Host "  Mot de passe" -AsSecureString
@@ -198,7 +198,7 @@ function Resolve-ShareCredential {
                 return @{ Username = $u; Password = $p }
             }
             # 3. Prompt
-            Write-NSLog "Aucun credential automatique -- prompt operateur" -Level WARN
+            Write-NSLog "No automatic credential -- operator prompt" -Level WARN
             return Resolve-ShareCredential -Mode Prompt
         }
     }
@@ -249,7 +249,7 @@ function Connect-DeployShare {
     [string]$ServerIPFallback = ''   # IP pre-resolue (depuis NetworkShareFallback)
     )
 
-    Write-NSLog "=== Connexion partages de deploiement ===" -Level STEP
+    Write-NSLog "=== Connecting deployment shares ===" -Level STEP
 
     # Resolution serveur depuis psd1 si non fourni
     if (-not $Server) {
@@ -365,7 +365,7 @@ function Connect-DeployShare {
             if ($share -notmatch $optionalPattern) {
                 throw "Partage critique inaccessible : $share`nCompte : $($cred.Username)`nVerifier : partage SMB existant, compte valide, port 445 ouvert."
             }
-            Write-NSLog "  (partage optionnel -- continuation)" -Level INFO
+            Write-NSLog "  (optional share -- continuing)" -Level INFO
         } else {
             $connected += $share
         }

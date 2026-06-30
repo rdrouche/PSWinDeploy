@@ -1,5 +1,5 @@
 ﻿@{
-    ModuleVersion     = '0.7.0'
+    ModuleVersion     = '0.8.0'
     GUID              = 'a1b2c3d4-0001-0001-0001-000000000001'
     Author            = 'PSWinDeploy'
     Description       = "Construction d'environnements WinPE bootables"
