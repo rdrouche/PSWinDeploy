@@ -193,7 +193,7 @@ function Test-IsSource { param([string]$D)
 Clear-Host
 Write-Host ""
 Write-Host "  ==========================================================" -ForegroundColor Cyan
-Write-Host "        PSWinDeploy -- Mise a jour                          " -ForegroundColor Cyan
+Write-Host "        PSWinDeploy -- Update                              " -ForegroundColor Cyan
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
 if ($DryRun) { Write-Host "  SIMULATION MODE -- No file will be modified" -ForegroundColor DarkYellow; Write-Host "" }
@@ -272,14 +272,14 @@ if ($SourcePath -and -not $ArchivePath) {
 }
 
 if (-not $SourcePath -and -not $ArchivePath) {
-    Write-Host "  [1] Fichier archive (.zip)" -ForegroundColor Gray
-    Write-Host "  [2] Dossier extrait" -ForegroundColor Gray
+    Write-Host "  [1] Archive file (.zip)" -ForegroundColor Gray
+    Write-Host "  [2] Extracted folder" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  [?]  Source : " -ForegroundColor White -NoNewline
     $choice = (Read-Host).Trim()
 
     if ($choice -eq '2') {
-        Write-Host "  [?]  Chemin du dossier source : " -ForegroundColor White -NoNewline
+        Write-Host "  [?]  Source folder path: " -ForegroundColor White -NoNewline
         $SourcePath = (Read-Host).Trim().Trim('"').Trim("'").Trim()
     } else {
         # Chercher les zip disponibles
@@ -394,7 +394,7 @@ if (-not $DryRun -and -not $updateAll) {
     Write-Host "       Modules + Scripts + API + Web + scripts racine" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [2] Choose component by component" -ForegroundColor White
-    Write-Host "       Confirmation individuelle pour chaque groupe" -ForegroundColor DarkGray
+    Write-Host "       Individual confirmation for each group" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [3] Simulation (DryRun)" -ForegroundColor White
     Write-Host "       Voir ce qui serait mis a jour sans rien modifier" -ForegroundColor DarkGray
@@ -530,7 +530,7 @@ if ($DryRun) {
     Write-OK "$totalUpdated fichier(s) mis a jour  (v$installedVersion -> v$sourceVersion)"
     Write-Host ""
     Write-Info "Actions post-mise a jour :"
-    Write-Host "  - Verifier PSWinDeploy.psd1 (nouvelles cles eventuelles)" -ForegroundColor Gray
+    Write-Host "  - Check PSWinDeploy.psd1 (possible new keys)" -ForegroundColor Gray
     if ($wimRebuildNeeded) {
         Write-Host ""
         Write-Warn "  /!\ Modules ou scripts modifies -- RECONSTRUIRE le WinPE :"
@@ -538,7 +538,7 @@ if ($DryRun) {
         Write-Host ""
     }
     Write-Host "  - Redemarrer l'API si modifiee : Start-API.ps1" -ForegroundColor Gray
-    Write-Host "  - Redemarrer le Web si modifie : docker-compose restart" -ForegroundColor Gray
+    Write-Host "  - Restart the web if changed: docker-compose restart" -ForegroundColor Gray
     if ($backupDir -and (Test-Path $backupDir -EA SilentlyContinue)) {
         Write-Host ""
         Write-Info "Sauvegarde disponible : $backupDir"

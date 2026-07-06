@@ -231,7 +231,7 @@ else         { Write-Warn "DISM not found -- using the system DISM" }
 Write-Header "Step 2 -- Architecture"
 
 Write-Info "Architectures supported since ADK 2004:"
-Write-Host "    amd64 : x64 standard -- la quasi-totalite des PC/serveurs" -ForegroundColor Gray
+Write-Host "    amd64 : standard x64 -- nearly all PCs/servers" -ForegroundColor Gray
 Write-Host "    arm64 : Surface Pro X, Copilot+ PC, serveurs ARM" -ForegroundColor Gray
 Write-Host "    x86   : RETIRE depuis ADK 2004 -- non supporte" -ForegroundColor DarkGray
 Write-Host ""
@@ -455,13 +455,13 @@ if ($existingVaultPath) {
 }
 
 if (-not $sharePass) {
-    Write-Host "  [?]  Mot de passe pour $shareUser : " -ForegroundColor White -NoNewline
+    Write-Host "  [?]  Password for ${shareUser}: " -ForegroundColor White -NoNewline
     $sp = Read-Host -AsSecureString
     $sharePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp))
 } else {
     if (-not (Read-YesNo "Use the existing vault password?" $true)) {
-        Write-Host "  [?]  Nouveau mot de passe pour $shareUser : " -ForegroundColor White -NoNewline
+        Write-Host "  [?]  New password for ${shareUser}: " -ForegroundColor White -NoNewline
         $sp = Read-Host -AsSecureString
         $sharePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp))
@@ -619,7 +619,7 @@ Write-Host "  Drivers Net     : $netPath" -ForegroundColor $(if(Test-Path $netPa
 Write-Host "  Drivers Storage : $storagePath" -ForegroundColor $(if(Test-Path $storagePath -EA SilentlyContinue){'Green'}else{'Yellow'})
 Write-Host "  Drivers Sys     : $sysPath" -ForegroundColor $(if(Test-Path $sysPath -EA SilentlyContinue){'Green'}else{'Yellow'})
 Write-Host ""
-Write-Host "  Compte reseau   : $shareUser" -ForegroundColor White
+Write-Host "  Network account : $shareUser" -ForegroundColor White
 Write-Host "  Vault           : $vaultMode" -ForegroundColor White
 Write-Host ""
 Write-Host "  Workspace       : $workspacePath" -ForegroundColor White
@@ -675,7 +675,7 @@ New-Item -ItemType Directory $vaultTmpDir -Force | Out-Null
 # Garde-fou : le mot de passe ne doit jamais etre vide
 if ([string]::IsNullOrWhiteSpace($sharePass)) {
     Write-Warn "Empty WinPE password -- entry required"
-    Write-Host "  [?]  Mot de passe pour $shareUser : " -ForegroundColor White -NoNewline
+    Write-Host "  [?]  Password for ${shareUser}: " -ForegroundColor White -NoNewline
     $sp = Read-Host -AsSecureString
     $sharePass = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sp))
@@ -963,7 +963,7 @@ if ($pxeWimPath -and (Test-Path $pxeWimPath)) {
         Write-Host "        wdsutil /add-image /imagefile:$pxeWimPath /imagetype:boot" -ForegroundColor Cyan
         Write-Host "      Or via the WDS console: right-click Boot Images > Add" -ForegroundColor Gray
     } else {
-        Write-Host "      Image importee dans WDS : $($wdsConfig.BootImageName)" -ForegroundColor Green
+        Write-Host "      Image imported into WDS: $($wdsConfig.BootImageName)" -ForegroundColor Green
         Write-Host "      Configure the WDS answer policy if not already done" -ForegroundColor Gray
     }
 }
@@ -972,5 +972,5 @@ Write-Host ""
 Write-Host "  Notes WDS/PXE :" -ForegroundColor Cyan
 Write-Host "    - Configure DHCP option 66 (WDS server name) and 67 (pxeboot.n12)" -ForegroundColor Gray
 Write-Host "    - Or DHCP option 60 (PXEClient) depending on your DHCP server" -ForegroundColor Gray
-Write-Host "    - Le serveur WDS doit repondre aux clients PXE (wdsutil /set-server /answerclientson)" -ForegroundColor Gray
+Write-Host "    - The WDS server must answer PXE clients (wdsutil /set-server /answerclientson)" -ForegroundColor Gray
 Write-Host ""

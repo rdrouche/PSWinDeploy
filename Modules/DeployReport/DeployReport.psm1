@@ -142,7 +142,13 @@ function Send-DeployReport {
             step         = $Step
             percent      = $Percent
             message      = $Message
-            timestamp    = (Get-Date -Format 'o')
+            # Heure MURALE brute (sans conversion UTC ni offset). Raison : WinPE
+            # (phase 1) et Windows (phase 2) lisent la MEME horloge RTC mais
+            # l'interpretent differemment (WinPE se croit en UTC, Windows connait
+            # son fuseau). Convertir en UTC les desynchronise et donnait des durees
+            # negatives (0s). En stockant l'heure murale telle quelle des deux
+            # cotes, la difference P1->P2 reste coherente.
+            timestamp    = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fff')
         } | ConvertTo-Json -Compress
 
         $uri = "$($ApiUrl.TrimEnd('/'))/api/deploy/report"
@@ -259,8 +265,58 @@ function Get-DeployPending {
     } catch { return $null }
 }
 
+function Send-DeployDoneMail {
+    <#
+    .SYNOPSIS Signale la fin du deploiement a l'API pour que le SERVEUR envoie
+        l'email de notification. Le poste client n'envoie AUCUN email lui-meme
+        (pas de SMTP depuis le reseau de deploiement, pas de secret sur le poste).
+        Best-effort : silencieux si l'API est injoignable ou non configuree.
+    .PARAMETER Success   $true si le deploiement est un succes.
+    .PARAMETER Sequence  nom de la sequence (optionnel).
+    .PARAMETER ApiUrl    URL de base de l'API. Si vide, lue depuis api-url.txt.
+    .PARAMETER RuntimeDir Dossier ou lire api-url.txt / api-token.txt.
+    #>
+    param(
+        [bool]$Success = $true,
+        [string]$Sequence = '',
+        [string]$ApiUrl = '',
+        [string]$RuntimeDir = 'C:\Deploy\Runtime'
+    )
+    # Resoudre l'URL de l'API : parametre, sinon fichier depose au deploiement.
+    if (-not $ApiUrl) {
+        $urlFile = Join-Path $RuntimeDir 'api-url.txt'
+        if (Test-Path $urlFile -EA SilentlyContinue) {
+            try { $ApiUrl = (Get-Content $urlFile -Raw -EA SilentlyContinue).Trim() } catch {}
+        }
+    }
+    if (-not $ApiUrl) { return $false }   # pas d'API -> on ne fait rien
+
+    try {
+        $body = @{
+            computerName = $env:COMPUTERNAME
+            success      = $Success
+            sequence     = $Sequence
+        } | ConvertTo-Json -Compress
+
+        $headers = @{}
+        $tok = ''
+        $tokFile = Join-Path $RuntimeDir 'api-token.txt'
+        if (Test-Path $tokFile -EA SilentlyContinue) {
+            try { $tok = (Get-Content $tokFile -Raw -EA SilentlyContinue).Trim() } catch {}
+        }
+        if ($tok) { $headers['X-Deploy-Token'] = "$tok".Trim() }
+
+        $uri = "$($ApiUrl.TrimEnd('/'))/api/notify/deploy-done"
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -Headers $headers -TimeoutSec 10 -EA SilentlyContinue | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 Export-ModuleMember -Function @(
     'Send-DeployReport'
+    'Send-DeployDoneMail'
     'Set-DeployApiEndpoint'
     'Register-DeployWaiting'
     'Get-DeployPending'

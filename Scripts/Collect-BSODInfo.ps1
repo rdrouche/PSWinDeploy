@@ -52,7 +52,7 @@ if (-not $WindowsDrive) {
     if ($found.Count -eq 0) {
         Write-Host "ERROR: no Windows partition found (no ntoskrnl.exe)." -ForegroundColor Red
         Write-Host "Le VHDX est-il bien monte ? (Mount-VHD -Path ...)" -ForegroundColor Yellow
-        Write-Host "Verifie : Get-Volume  doit lister les lettres du VHDX." -ForegroundColor Yellow
+        Write-Host "Check: Get-Volume must list the VHDX drive letters." -ForegroundColor Yellow
         return
     }
     Say "Partition(s) Windows detectee(s) :" 'Green'
@@ -67,7 +67,7 @@ if (-not $WindowsDrive) {
 }
 
 if (-not (Test-Path "$W\Windows")) {
-    Write-Host "ERREUR : $W\Windows introuvable." -ForegroundColor Red
+    Write-Host "ERROR: $W\Windows not found." -ForegroundColor Red
     return
 }
 

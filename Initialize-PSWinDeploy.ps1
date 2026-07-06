@@ -129,7 +129,7 @@ Clear-Host
 Write-Host ""
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host "                PSWinDeploy  --  Setup                     " -ForegroundColor Cyan
-Write-Host "         A modern MDT replacement in PowerShell  v0.8.0    " -ForegroundColor Cyan
+Write-Host "         A modern MDT replacement in PowerShell  v0.9.0    " -ForegroundColor Cyan
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  This script will:" -ForegroundColor White
@@ -373,14 +373,14 @@ if ($configNotif) {
 # ---------------------------------------------------------------------------
 
 Write-Header "Summary"
-Write-Host "  Dossier installation   : $InstallPath" -ForegroundColor Gray
+Write-Host "  Installation folder    : $InstallPath" -ForegroundColor Gray
 Write-Host "  Serveur partages       : \\$serverFQDN\..." -ForegroundColor Gray
 Write-Host "  Partages SMB           : $(if ($createShares) { 'Oui' } else { 'Non' })" -ForegroundColor Gray
 Write-Host "  Account WinPE           : $winpeUserFull" -ForegroundColor Gray
 Write-Host "  Type vault             : $vaultMode" -ForegroundColor Gray
 Write-Host "  Domaine                : $(if ($joinDomain) { $domainName } else { '(standalone)' })" -ForegroundColor Gray
 if ($joinDomain) {
-    Write-Host "  Account jonction        : $domainName\$domainJoinUser" -ForegroundColor Gray
+    Write-Host "  Join account            : $domainName\$domainJoinUser" -ForegroundColor Gray
     Write-Host "  OU par defaut          : $(if ($defaultOU) { $defaultOU } else { '(non defini)' })" -ForegroundColor Gray
 }
 Write-Host "  Architecture WinPE     : $arch" -ForegroundColor Gray
@@ -569,23 +569,22 @@ $domainSection = if ($joinDomain) {
     "    # No domain configured (standalone)"
 }
 
-$notifSection = ''
-if ($smtpServer -or $teamsWebhook) {
-    $toLine = if ($smtpTo) {
-        $toArr = ($smtpTo -split ',') | ForEach-Object { "'$($_.Trim())'" }
-        "@($($toArr -join ', '))"
-    } else { '@()' }
-
-    $mailPart = if ($smtpServer) {
-        "        Mail = @{`r`n            Enabled    = `$true`r`n            SmtpServer = '$smtpServer'`r`n            Port       = 587`r`n            UseTls     = `$true`r`n            From       = '$smtpFrom'`r`n            To         = $toLine`r`n        }`r`n"
-    } else { '' }
-
-    $teamsPart = if ($teamsWebhook) {
-        "        Teams = @{`r`n            Enabled    = `$true`r`n            WebhookUrl = '$teamsWebhook'`r`n        }`r`n"
-    } else { '' }
-
-    $notifSection = "    Notifications   = @{`r`n$mailPart$teamsPart    }"
-}
+# Section notification email (schema plat MailNotify). Toujours generee, avec
+# NotifEmail actif seulement si un serveur SMTP a ete fourni a l'assistant.
+$notifEnabled = if ($smtpServer) { '$true' } else { '$false' }
+$notifSection = @(
+    "    # -- Email notification (end of deployment) --"
+    "    # Sent once at final cleanup. Missing keys => feature disabled (never blocks)."
+    "    # SMTP_USER/SMTP_PASSWORD empty => no auth. SMTP_SECURE: Plain | TLS | SSL."
+    "    NotifEmail    = $notifEnabled"
+    "    SMTP_FROM     = '$smtpFrom'"
+    "    SMTP_TO       = '$smtpTo'"
+    "    SMTP_Server   = '$smtpServer'"
+    "    SMTP_Port     = 587"
+    "    SMTP_SECURE   = 'TLS'"
+    "    SMTP_USER     = ''"
+    "    SMTP_PASSWORD = ''"
+) -join "`r`n"
 
 $vaultPassComment = if ($vaultMode -eq 'AES') {
     "    # Use env var PSWINDEX_VAULT_PASSWORD or -VaultPassword at WinPE build"
@@ -601,7 +600,7 @@ $apiToken = New-RandomString
 $psd1Lines = @(
     '@{'
     '    # Version'
-    "    Version         = '0.8.0'"
+    "    Version         = '0.9.0'"
     "    ProjectName     = 'PSWinDeploy'"
     ''
     '    # ADK / WinPE -- x86 retire depuis ADK 2004, amd64 et arm64 uniquement'

@@ -100,4 +100,4 @@ foreach ($f in @('C:\Deploy\deploy-config.psd1','C:\Deploy\secrets.vault','C:\De
 }
 Write-Host ""
 Write-Host "  Si deploy-config ABSENT -> SimpleDeploy ne l'a pas ecrit (CopyDeploy off ?)" -ForegroundColor Yellow
-Write-Host "  Si vault sans localAdminPassword -> rebuild WinPE avec le nouveau build" -ForegroundColor Yellow
+Write-Host "  If vault without localAdminPassword -> rebuild WinPE with the new build" -ForegroundColor Yellow

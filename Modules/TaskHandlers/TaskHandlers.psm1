@@ -200,6 +200,40 @@ function Invoke-TaskShowWizard {
     return New-TaskResult -Message 'show-wizard' -Data 'wizard'
 }
 
+function Invoke-TaskNotify {
+    <#
+    .SYNOPSIS Action de sequence : envoie une notification email de fin via le
+        SERVEUR (l'API). Le poste ne fait AUCUN envoi SMTP -- il signale juste la
+        fin a l'API, qui envoie le mail cote serveur (secret SMTP sur le serveur,
+        pas de SMTP sortant depuis le reseau de deploiement).
+        Best-effort : n'echoue jamais la sequence.
+    .DESCRIPTION
+        Parametre optionnel du step : success ('true'/'false', defaut true).
+        Le nom de l'ordinateur transmis est $env:COMPUTERNAME.
+    #>
+    param($Step, $Context)
+
+    $successParam = Get-StepParam $Step 'success'
+    $ok = $true
+    if ($successParam) { $ok = ("$successParam" -match '^(true|1|yes|on)$') }
+
+    Write-TaskLog "Sending end-of-deployment notification (server-side email)..." 'STEP' $Context $Step.id
+
+    # Charger le module DeployReport (client leger) qui sait joindre l'API.
+    $drMod = Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployReport\DeployReport.psm1'
+    if (Test-Path $drMod) { Import-Module $drMod -Force -EA SilentlyContinue }
+
+    if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
+        $sent = Send-DeployDoneMail -Success $ok
+        if ($sent) { Write-TaskLog "Notification signal sent to the API." 'SUCCESS' $Context $Step.id }
+        else { Write-TaskLog "Could not reach the API for the notification (skipped)." 'INFO' $Context $Step.id }
+    } else {
+        Write-TaskLog "Send-DeployDoneMail not available -- notification skipped." 'WARN' $Context $Step.id
+    }
+    # Best-effort : toujours un succes (ne bloque jamais la sequence).
+    return New-TaskResult -Message 'notify-sent'
+}
+
 # ===========================================================================
 #  Outils winget / choco (internes)
 # ===========================================================================
@@ -432,13 +466,27 @@ function Install-OneApp {
             Write-TaskLog "  Tentative installeur : $path" 'INFO' $Context
             try {
                 if ($path -match '\.msi$') {
-                    $p = Start-Process 'msiexec.exe' -ArgumentList "/i `"$path`" /qn $insArgs" -Wait -PassThru
+                    # MSI : msiexec /i "chemin" /qn [args]. La chaine est toujours
+                    # non vide, pas de souci d'argument vide.
+                    $msiArgs = "/i `"$path`" /qn"
+                    if ($insArgs) { $msiArgs = "$msiArgs $insArgs" }
+                    $p = Start-Process 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
                 } else {
-                    $p = Start-Process $path -ArgumentList $insArgs -Wait -PassThru
+                    # EXE : Start-Process n'accepte PAS -ArgumentList '' (chaine vide)
+                    # en PowerShell 5.1 -- cela leve une erreur. On ne passe donc le
+                    # parametre QUE si des arguments sont reellement fournis. Sans
+                    # arguments, on lance l'installeur seul.
+                    # -NoNewWindow : eviter qu'une fenetre interactive bloque le
+                    # deploiement (l'installeur doit etre silencieux via ses Args).
+                    $spParams = @{ FilePath = $path; Wait = $true; PassThru = $true; NoNewWindow = $true }
+                    if ($insArgs -and $insArgs.Trim()) { $spParams.ArgumentList = $insArgs }
+                    $p = Start-Process @spParams
                 }
                 if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) { $ok = $true; Write-TaskLog "  Installeur OK : $name" 'SUCCESS' $Context }
                 else { Write-TaskLog "  Installeur code $($p.ExitCode)" 'WARN' $Context }
             } catch { Write-TaskLog "  Installeur erreur : $_" 'WARN' $Context }
+        } else {
+            Write-TaskLog "  Installeur introuvable : $path" 'WARN' $Context
         }
     }
 
@@ -769,6 +817,7 @@ Export-ModuleMember -Function @(
     'Invoke-TaskSetLocale'
     'Invoke-TaskCleanup'
     'Invoke-TaskShowWizard'
+    'Invoke-TaskNotify'
     'Write-TaskLog'
     'Invoke-TaskJoinDomain'
     'Invoke-TaskWaitForNetwork'

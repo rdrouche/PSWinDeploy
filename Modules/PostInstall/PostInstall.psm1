@@ -214,10 +214,40 @@ function Invoke-PostInstallCleanup {
     .SYNOPSIS Nettoyage de fin depuis l'assistant : supprime les fichiers sensibles
         de C:\Deploy, conserve C:\Deploy\Logs. Equivalent du step 'Cleanup'.
     #>
+    # -- Notification email de fin de deploiement (best-effort) --
+    # L'email est envoye par le SERVEUR (via l'API), PAS par ce poste : on evite
+    # d'ouvrir le SMTP sortant depuis tout le reseau de deploiement et le secret
+    # SMTP reste sur le serveur. On envoie juste un signal a l'API. Ne bloque
+    # jamais le nettoyage.
+    try {
+        $drMod = Join-Path $PSScriptRoot '..\DeployReport\DeployReport.psm1'
+        if (Test-Path $drMod) {
+            Import-Module $drMod -Force -EA SilentlyContinue
+            if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
+                # Notification simple : juste le nom de la machine. Pas de nom de
+                # sequence ici (pas toujours disponible dans ce contexte).
+                $ok = Send-DeployDoneMail -Success $true
+                if ($ok) { Write-PILog "End-of-deployment signal sent to the API (email handled server-side)." 'OK' }
+                else { Write-PILog "Could not reach the API for the end-of-deployment email (skipped)." 'INFO' }
+            } else { Write-PILog "DeployReport: Send-DeployDoneMail not available." 'WARN' }
+        } else { Write-PILog "DeployReport module not found at $drMod" 'WARN' }
+    } catch { Write-PILog "Deploy-done notification error: $_" 'WARN' }
+
     Write-PILog "End-of-deployment cleanup (C:\Deploy)..." 'STEP'
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return }
-    try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:`$false -EA SilentlyContinue | Out-Null } catch {}
+    try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
+
+    # Retirer le script de secours du BUREAU (il ne doit pas trainer sur le
+    # bureau une fois le deploiement termine). On le laisse dans C:\Deploy tant
+    # que le dossier existe -- seule la copie du bureau est supprimee ici.
+    foreach ($deskDir in @("$env:PUBLIC\Desktop", "$env:USERPROFILE\Desktop")) {
+        $resetOnDesktop = Join-Path $deskDir 'Reset-PSWinDeploy.ps1'
+        if (Test-Path $resetOnDesktop -EA SilentlyContinue) {
+            try { Remove-Item $resetOnDesktop -Force -EA Stop; Write-PILog "  Removed from Desktop: Reset-PSWinDeploy.ps1" 'INFO' }
+            catch { Write-PILog "  Could not remove Reset-PSWinDeploy.ps1 from $deskDir" 'WARN' }
+        }
+    }
 
     # Supprimer d'abord les fichiers sensibles (vault, config, state) -- toujours
     # possible. Les dossiers Scripts/Modules/Runtime contiennent le script en cours

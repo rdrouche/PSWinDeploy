@@ -148,7 +148,7 @@ $scriptDir   = Split-Path $PSCommandPath -Parent
 $projectRoot = Split-Path $scriptDir -Parent
 
 $cfg = @{
-    Version         = '0.8.0'
+    Version         = '0.9.0'
     AdkPath         = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
     WinPEAddonPath  = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment'
     Architecture    = 'amd64'
@@ -251,7 +251,7 @@ foreach ($candidate in @(
 }
 if (-not $modRoot) { $modRoot = Join-Path $scriptDir "App\Modules" }
 $modsLoaded = @{}
-foreach ($mod in @('Config','TaskSequence','WinPE-Builder','WIM-Manager','NetShare','ProfileManager','Notify')) {
+foreach ($mod in @('Config','TaskSequence','WinPE-Builder','WIM-Manager','NetShare','ProfileManager','MailNotify')) {
     $mp = Join-Path $modRoot "$mod\$mod.psm1"
     if (Test-Path $mp) {
         try {
@@ -382,7 +382,7 @@ function Show-HealthReport {
                         $cnt = (Get-ChildItem $sp -Filter '*.inf' -Recurse -EA SilentlyContinue).Count
                         Write-Info "    $sub : $cnt .inf"
                     } else {
-                        Write-Warn "    $sub : absent (creer et deposer les drivers)"
+                        Write-Warn "    $sub : missing (create it and drop the drivers)"
                     }
                 }
             }
@@ -407,7 +407,7 @@ function Show-HealthReport {
             Write-Warn "  WARNING: cleartext vault (Plain mode) -- not secure in production!"
         }
     } else {
-        Write-Warn "Vault absent : $($cfg.VaultPath)"
+        Write-Warn "Vault not found: $($cfg.VaultPath)"
         Write-Info "  Create with: Initialize-SecretVault in TaskSequence.psm1"
     }
     Write-Host ""
@@ -491,17 +491,17 @@ function Show-VaultMenu {
         Write-Warn "TaskSequence module not loaded -- some functions unavailable"
     }
 
-    Write-MenuItem '1' 'Afficher les cles presentes dans le vault'
-    Write-MenuItem '2' 'Changer le mot de passe admin local'
-    Write-MenuItem '3' 'Changer le mot de passe compte reseau WinPE'
-    Write-MenuItem '4' 'Changer le mot de passe jonction domaine'
-    Write-MenuItem '5' 'Changer le mot de passe deploy-temp'
-    Write-MenuItem '6' 'Changer le mot de passe vault AES (re-chiffrement)'
+    Write-MenuItem '1' 'Show the keys present in the vault'
+    Write-MenuItem '2' 'Change the local admin password'
+    Write-MenuItem '3' 'Change the WinPE network account password'
+    Write-MenuItem '4' 'Change the domain join password'
+    Write-MenuItem '5' 'Change the deploy-temp password'
+    Write-MenuItem '6' 'Change the AES vault password (re-encryption)'
     Write-MenuSep
-    Write-MenuItem '7' 'Recreer le vault complet (tous les secrets)'
-    Write-MenuItem '8' 'Convertir Plain -> AES (securiser un vault de lab)'
+    Write-MenuItem '7' 'Re-create the full vault (all secrets)'
+    Write-MenuItem '8' 'Convert Plain -> AES (secure a lab vault)'
     Write-MenuSep
-    Write-MenuItem 'R' 'Retour'
+    Write-MenuItem 'R' 'Back'
 
     $c = Read-MenuChoice
     switch ($c) {
@@ -537,16 +537,16 @@ function Show-VaultMenu {
                             $secrets.PSObject.Properties.Name | ForEach-Object {
                                 Write-Host "    $_" -ForegroundColor Gray
                             }
-                        } catch { Write-Err "Mot de passe incorrect ou vault corrompu" }
+                        } catch { Write-Err "Wrong password or corrupted vault" }
                     }
                 } catch { Write-Err "Erreur lecture vault : $_" }
-            } else { Write-Warn "Vault absent : $($cfg.VaultPath)" }
+            } else { Write-Warn "Vault not found: $($cfg.VaultPath)" }
             Invoke-Pause
         }
 
         { $_ -in @('2','3','4','5') } {
             $keyMap = @{ '2'='localAdminPassword'; '3'='winpePassword'; '4'='domainJoinPassword'; '5'='deployPassword' }
-            $labelMap = @{ '2'='Admin local'; '3'='Reseau WinPE (winpePassword)'; '4'='Jonction domaine'; '5'='deploy-temp' }
+            $labelMap = @{ '2'='Local admin'; '3'='WinPE network (winpePassword)'; '4'='Domain join'; '5'='deploy-temp' }
             $key   = $keyMap[$c]
             $label = $labelMap[$c]
 
@@ -577,11 +577,11 @@ function Show-VaultMenu {
                     $secrets = ($vaultData.data | ConvertTo-SecureString -Key $aesKey |
                         ForEach-Object { [Runtime.InteropServices.Marshal]::PtrToStringAuto(
                             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($_)) }) | ConvertFrom-Json
-                } catch { Write-Err "Mot de passe vault incorrect"; Invoke-Pause; return }
+                } catch { Write-Err "Wrong vault password"; Invoke-Pause; return }
             }
 
             # Demander le nouveau mot de passe
-            Write-Host "  [?]  Nouveau mot de passe pour $label : " -ForegroundColor White -NoNewline
+            Write-Host "  [?]  New password for ${label}: " -ForegroundColor White -NoNewline
             $np1 = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
                        [Runtime.InteropServices.Marshal]::SecureStringToBSTR((Read-Host -AsSecureString)))
             Write-Host "  [?]  Confirm: " -ForegroundColor White -NoNewline
@@ -603,13 +603,13 @@ function Show-VaultMenu {
                 $enc    = ($json | ConvertTo-SecureString -AsPlainText -Force) | ConvertFrom-SecureString -Key $aesKey
                 @{ method='AES'; data=$enc } | ConvertTo-Json | Set-Content $cfg.VaultPath -Encoding UTF8
             }
-            Write-OK "Mot de passe '$label' mis a jour dans le vault"
+            Write-OK "Password '$label' updated in the vault"
             Invoke-Pause
         }
 
         '6' {
             if (-not (Test-Path $cfg.VaultPath -EA SilentlyContinue)) {
-                Write-Err "Vault absent"; Invoke-Pause; return
+                Write-Err "Vault not found"; Invoke-Pause; return
             }
             $vaultData = Get-Content $cfg.VaultPath -Raw | ConvertFrom-Json
             if ($vaultData.method -eq 'Plain') {
@@ -639,7 +639,7 @@ function Show-VaultMenu {
                           [System.Text.Encoding]::UTF8.GetBytes($np1))
             $enc    = ($json | ConvertTo-SecureString -AsPlainText -Force) | ConvertFrom-SecureString -Key $newKey
             @{ method='AES'; data=$enc } | ConvertTo-Json | Set-Content $cfg.VaultPath -Encoding UTF8
-            Write-OK "Mot de passe vault AES modifie"
+            Write-OK "AES vault password changed"
             Invoke-Pause
         }
 
@@ -651,12 +651,12 @@ function Show-VaultMenu {
             Write-Host ""
             $s = @{}
             foreach ($entry in @(
-                @{ Key='winpeUser';          Label='Compte reseau WinPE (ex: SERVEUR\svc-winpe)'; IsUser=$true }
-                @{ Key='winpePassword';      Label='Mot de passe reseau WinPE' }
+                @{ Key='winpeUser';          Label='WinPE network account (e.g. SERVER\svc-winpe)'; IsUser=$true }
+                @{ Key='winpePassword';      Label='WinPE network password' }
                 @{ Key='domainJoinUser';     Label='Compte jonction domaine (ex: svc-joindomain)'; IsUser=$true }
-                @{ Key='domainJoinPassword'; Label='Mot de passe jonction domaine' }
-                @{ Key='localAdminPassword'; Label='Mot de passe admin local machines' }
-                @{ Key='deployPassword';     Label='Mot de passe deploy-temp' }
+                @{ Key='domainJoinPassword'; Label='Domain join password' }
+                @{ Key='localAdminPassword'; Label='Machines local admin password' }
+                @{ Key='deployPassword';     Label='deploy-temp password' }
             )) {
                 if ($entry.IsUser) {
                     Write-Host "  [?]  $($entry.Label) : " -ForegroundColor White -NoNewline
@@ -697,7 +697,7 @@ function Show-VaultMenu {
 
         '8' {
             if (-not (Test-Path $cfg.VaultPath -EA SilentlyContinue)) {
-                Write-Err "Vault absent"; Invoke-Pause; return
+                Write-Err "Vault not found"; Invoke-Pause; return
             }
             $vaultData = Get-Content $cfg.VaultPath -Raw | ConvertFrom-Json
             if ($vaultData.method -ne 'Plain') {
@@ -728,20 +728,20 @@ function Show-LogsMenu {
     $logDir  = Split-Path $logPath -Parent
     $logShare = $cfg.LogShare
 
-    Write-MenuItem '1' 'Afficher les 50 dernieres lignes du journal local'
-    Write-MenuItem '2' 'Rechercher dans les journaux (par machine ou date)'
-    Write-MenuItem '3' 'Afficher uniquement les erreurs'
-    Write-MenuItem '4' 'Lister les journaux sur le partage reseau'
-    Write-MenuItem '5' 'Nettoyer les journaux de plus de 30 jours'
+    Write-MenuItem '1' 'Show the last 50 lines of the local log'
+    Write-MenuItem '2' 'Search the logs (by machine or date)'
+    Write-MenuItem '3' 'Show errors only'
+    Write-MenuItem '4' 'List logs on the network share'
+    Write-MenuItem '5' 'Clean logs older than 30 days'
     Write-MenuSep
-    Write-MenuItem 'R' 'Retour'
+    Write-MenuItem 'R' 'Back'
 
     $c = Read-MenuChoice
     switch ($c) {
         '1' {
             if (Test-Path $logPath) {
                 Write-Host ""
-                Write-Info "Journal : $logPath"
+                Write-Info "Log: $logPath"
                 Write-Host "  $('-'*56)" -ForegroundColor DarkGray
                 Get-Content $logPath -Tail 50 | ForEach-Object {
                     $col = if ($_ -match '\[X\]') { 'Red' }
@@ -751,7 +751,7 @@ function Show-LogsMenu {
                            else { 'Gray' }
                     Write-Host "  $_" -ForegroundColor $col
                 }
-            } else { Write-Warn "Journal absent : $logPath" }
+            } else { Write-Warn "Log not found: $logPath" }
             Invoke-Pause
         }
         '2' {
@@ -811,7 +811,7 @@ function Show-LogsMenu {
                 $logs = Get-ChildItem $logShare -Filter '*.log' -Recurse -EA SilentlyContinue |
                         Sort-Object LastWriteTime -Descending
                 Write-Host ""
-                Write-Info "$($logs.Count) journal(ux) sur $logShare"
+                Write-Info "$($logs.Count) log(s) on $logShare"
                 $logs | Select-Object -First 20 | ForEach-Object {
                     $age  = [Math]::Round(((Get-Date)-$_.LastWriteTime).TotalDays,0)
                     Write-Host ("    {0,-40} {1,8}  il y a {2}j" -f $_.Name, (Format-Size $_.Length), $age) -ForegroundColor Gray
@@ -848,7 +848,7 @@ function Show-HttpsMenu {
 
     $certDir  = Join-Path (Split-Path $cfgFile -Parent) 'Certs'
     $certPfx  = Join-Path $certDir 'pswd-api.pfx'
-    $httpsState = if (Test-Path $certPfx -EA SilentlyContinue) { 'cert present' } else { 'aucun cert' }
+    $httpsState = if (Test-Path $certPfx -EA SilentlyContinue) { 'cert present' } else { 'no cert' }
     Write-Host "    Etat : " -ForegroundColor Gray -NoNewline
     Write-Host $httpsState -ForegroundColor $(if ($httpsState -eq 'cert present') { 'Green' } else { 'DarkGray' })
     Write-Host ""
@@ -858,7 +858,7 @@ function Show-HttpsMenu {
     Write-MenuItem '3' 'Show how to enable HTTPS in Start-API.ps1'
     Write-MenuItem '4' 'Switch back to HTTP (disable HTTPS)'
     Write-MenuSep
-    Write-MenuItem 'R' 'Retour'
+    Write-MenuItem 'R' 'Back'
     $c = Read-MenuChoice
     switch ($c) {
         '1' {
@@ -940,7 +940,7 @@ function Show-SequencesMenu {
     Write-MenuItem '4' "Enable / disable the default sequence [$defState]"
     Write-MenuItem '5' 'Edit sequences (assistant)'
     Write-MenuSep
-    Write-MenuItem 'R' 'Retour'
+    Write-MenuItem 'R' 'Back'
     $c = Read-MenuChoice
     switch ($c) {
         '1' {
@@ -1039,13 +1039,13 @@ function Show-DriversMenu {
     Write-Info "Partage drivers : $driverBase$accessStr"
     Write-Host ""
 
-    Write-MenuItem '1' 'Resume des drivers disponibles'   'Comptage .inf par categorie WinPE et OS'
-    Write-MenuItem '2' 'Creer la structure de dossiers'   'WinPE\Net, WinPE\Storage, WinPE\Sys, Dell, HP...'
-    Write-MenuItem '3' 'Lister les drivers WinPE'         'Detail Net / Storage / Sys'
-    Write-MenuItem '4' 'Lister les drivers OS par modele' 'Sous-dossiers fabricant\modele'
-    Write-MenuItem '5' 'Verifier les drivers manquants'   'Analyse avant build WinPE'
+    Write-MenuItem '1' 'Summary of available drivers'    '.inf count per WinPE and OS category'
+    Write-MenuItem '2' 'Create the folder structure'     'WinPE\Net, WinPE\Storage, WinPE\Sys, Dell, HP...'
+    Write-MenuItem '3' 'List WinPE drivers'              'Net / Storage / Sys detail'
+    Write-MenuItem '4' 'List OS drivers by model'        'vendor\model subfolders'
+    Write-MenuItem '5' 'Check for missing drivers'       'Analysis before WinPE build'
     Write-MenuSep
-    Write-MenuItem 'R' 'Retour'
+    Write-MenuItem 'R' 'Back'
 
     $c = Read-MenuChoice
     switch ($c) {
@@ -1056,7 +1056,7 @@ function Show-DriversMenu {
 
             Write-Host "  WinPE drivers" -ForegroundColor White
             foreach ($cat in @('WinPE\Net','WinPE\Storage','WinPE\Sys')) {
-                $labels = @{ 'WinPE\Net'='NIC reseau'; 'WinPE\Storage'='NVMe/SATA/RAID'; 'WinPE\Sys'='Chipset/USB' }
+                $labels = @{ 'WinPE\Net'='Network NIC'; 'WinPE\Storage'='NVMe/SATA/RAID'; 'WinPE\Sys'='Chipset/USB' }
                 $p    = Join-Path $driverBase $cat
                 $infs = if (Test-Path $p -EA SilentlyContinue) {
                             @(Get-ChildItem $p -Filter '*.inf' -Recurse -EA SilentlyContinue)
@@ -1066,7 +1066,7 @@ function Show-DriversMenu {
                         } else { @() }
                 $col  = if ($infs.Count -gt 0) { 'Green' } elseif (Test-Path $p -EA SilentlyContinue) { 'Yellow' } else { 'Red' }
                 $state = if (Test-Path $p -EA SilentlyContinue) { "$($infs.Count) .inf" } else { "absent" }
-                Write-Host ("    {0,-20} {1,-12}  {2,2} sous-dossier(s)  [{3}]" -f $cat, $state, $subs.Count, $labels[$cat]) -ForegroundColor $col
+                Write-Host ("    {0,-20} {1,-12}  {2,2} subfolder(s)  [{3}]" -f $cat, $state, $subs.Count, $labels[$cat]) -ForegroundColor $col
                 $subs | ForEach-Object {
                     $cnt = @(Get-ChildItem $_.FullName -Filter '*.inf' -Recurse -EA SilentlyContinue).Count
                     Write-Host ("         {0,-28} {1} .inf" -f $_.Name, $cnt) -ForegroundColor DarkGray
@@ -1118,7 +1118,7 @@ function Show-DriversMenu {
                     } else { Write-Info "Existe : $dir" }
                 }
                 Write-Host ""
-                Write-Info "Deposer ensuite les fichiers .inf/.sys/.cat dans :"
+                Write-Info "Then drop the .inf/.sys/.cat files into:"
                 Write-Host "    WinPE\Net\     WinPE NIC drivers (Intel I225, Realtek 8125...)" -ForegroundColor Gray
                 Write-Host "    WinPE\Storage\ NVMe (Samsung, Intel RST, AMD RAID...)" -ForegroundColor Gray
                 Write-Host "    WinPE\Sys\     Intel/AMD chipset, USB 3.x" -ForegroundColor Gray
@@ -1141,7 +1141,7 @@ function Show-DriversMenu {
                         }
                         if ($infs.Count -gt 12) { Write-Host "    ... $($infs.Count-12) autres" -ForegroundColor DarkGray }
                     } else { Write-Host "    (empty -- no .inf)" -ForegroundColor DarkGray }
-                } else { Write-Host "    (absent)" -ForegroundColor Red }
+                } else { Write-Host "    (missing)" -ForegroundColor Red }
                 Write-Host ""
             }
             Invoke-Pause
@@ -1162,7 +1162,7 @@ function Show-DriversMenu {
                     Write-Host ("    {0,-35} {1,3} .inf" -f $model.Name, $cnt) -ForegroundColor $col
                 }
                 if ($models.Count -eq 0) {
-                    Write-Host "    (aucun modele -- creer $($fab.Name)\<NOM-MODELE>\)" -ForegroundColor DarkGray
+                    Write-Host "    (no model -- create $($fab.Name)\<MODEL-NAME>\)" -ForegroundColor DarkGray
                 }
                 Write-Host ""
             }
@@ -1188,9 +1188,9 @@ function Show-DriversMenu {
                     Write-OK "$label : $($infs.Count) .inf"
                 } else {
                     if ($label -match 'CRITIQUE') {
-                        Write-Err "$label : AUCUN driver"
+                        Write-Err "$label : NO driver"
                         $allOk = $false
-                    } else { Write-Warn "$label : aucun (optionnel)" }
+                    } else { Write-Warn "$label : none (optional)" }
                 }
             }
             Write-Host ""
@@ -1214,25 +1214,39 @@ function Show-DriversMenu {
 
 function Show-NotifyMenu {
     Write-MenuHeader "Notifications"
-    Write-MenuItem '1' 'Tester toutes les notifications configurees'
-    Write-MenuItem '2' 'Tester uniquement email'
-    Write-MenuItem '3' 'Tester uniquement Teams'
-    Write-MenuItem '4' 'Afficher la configuration notifications'
+    Write-MenuItem '1' 'Send a test email'
+    Write-MenuItem '2' 'Show the email configuration'
     Write-MenuSep
-    Write-MenuItem 'R' 'Retour'
+    Write-MenuItem 'R' 'Back'
     $c = Read-MenuChoice
     switch ($c) {
-        '1' { if ($modsLoaded['Notify']) { Test-NotifyConfig -Channel All } else { Write-Warn "Module Notify non charge" }; Invoke-Pause }
-        '2' { if ($modsLoaded['Notify']) { Test-NotifyConfig -Channel Mail } else { Write-Warn "Module Notify non charge" }; Invoke-Pause }
-        '3' { if ($modsLoaded['Notify']) { Test-NotifyConfig -Channel Teams } else { Write-Warn "Module Notify non charge" }; Invoke-Pause }
-        '4' {
+        '1' {
+            Write-Host ""
+            $mailMod = Join-Path $modRoot 'MailNotify\MailNotify.psm1'
+            if (Test-Path $mailMod) {
+                Import-Module $mailMod -Force -EA SilentlyContinue
+                if (Test-MailNotifyEnabled) {
+                    $sent = Send-DeployMail -Result ([PSCustomObject]@{ ComputerName = $env:COMPUTERNAME; Success = $true; Sequence = 'TEST'; DurationSec = 0 })
+                    if ($sent) { Write-OK "Test email sent." } else { Write-Warn "Email could not be sent (check SMTP settings)." }
+                } else {
+                    Write-Warn "Email notifications disabled or incomplete (check NotifEmail and SMTP_* in PSWinDeploy.psd1)."
+                }
+            } else { Write-Warn "MailNotify module not found." }
+            Invoke-Pause
+        }
+        '2' {
             Write-Host ""
             if ($cfgFile) {
                 $cfgData = Import-PowerShellDataFile $cfgFile
-                if ($cfgData.Notifications) {
-                    $cfgData.Notifications | ConvertTo-Json -Depth 5 | Write-Host -ForegroundColor Gray
-                } else { Write-Warn "Aucune section Notifications dans $cfgFile" }
-            } else { Write-Warn "PSWinDeploy.psd1 non charge" }
+                $mailKeys = @('NotifEmail','SMTP_FROM','SMTP_TO','SMTP_Server','SMTP_Port','SMTP_SECURE','SMTP_USER','SMTP_PASSWORD')
+                Write-Host "  Email configuration:" -ForegroundColor Cyan
+                foreach ($k in $mailKeys) {
+                    $v = $cfgData[$k]
+                    if ("$k".ToLower() -like '*password*') { $v = if ($v) { '********' } else { '(empty)' } }
+                    elseif ($null -eq $v -or "$v" -eq '') { $v = '(empty)' }
+                    Write-Host ("    {0,-14}: {1}" -f $k, $v) -ForegroundColor Gray
+                }
+            } else { Write-Warn "PSWinDeploy.psd1 not loaded" }
             Invoke-Pause
         }
     }
@@ -1268,10 +1282,10 @@ while ($true) {
     Write-Host ""
 
     # Menu principal
-    Write-MenuHeader "Menu principal"
+    Write-MenuHeader "Main menu"
 
     Write-Host "  DEPLOYMENT" -ForegroundColor DarkGray
-    Write-MenuItem 'D' 'Gerer les sequences' 'Creer / editer des sequences PSD1 de deploiement'
+    Write-MenuItem 'D' 'Manage sequences' 'Create / edit PSD1 deployment sequences'
     Write-Host ""
 
     Write-Host "  $(T 'Console.Section.Winpe' 'WINPE')" -ForegroundColor DarkGray
@@ -1285,7 +1299,7 @@ while ($true) {
     Write-MenuItem 'V' (T 'Console.Menu.Vault' 'Vault / Passwords') 'Change, rotate, convert secrets'
     Write-MenuItem 'P' (T 'Console.Menu.Sequences' 'Sequences') 'List, validate, show, enable/disable the default sequence'
     Write-MenuItem 'L' (T 'Console.Menu.Logs' 'Logs') 'View, search, clean'
-    Write-MenuItem 'N' (T 'Console.Menu.Notify' 'Notifications') 'Test email and Teams'
+    Write-MenuItem 'N' (T 'Console.Menu.Notify' 'Notifications') 'Test email'
     Write-Host ""
 
     Write-Host "  $(T 'Console.Section.Config' 'CONFIGURATION')" -ForegroundColor DarkGray
@@ -1294,7 +1308,7 @@ while ($true) {
     Write-MenuItem 'H' (T 'Console.Menu.Https' 'API HTTPS / Certificate')       'Generate a self-signed cert or provide one (encrypt the API)'
     Write-MenuItem 'I' (T 'Console.Menu.Reinit' 'Re-initialize') 'Re-run Initialize-PSWinDeploy.ps1'
     Write-MenuItem 'C' (T 'Console.Menu.OpenConfig' 'Open PSWinDeploy.psd1') 'Edit the configuration in Notepad'
-    $advState = if ($cfg.AdvancedMode) { 'ACTIVE' } else { 'desactive' }
+    $advState = if ($cfg.AdvancedMode) { 'ACTIVE' } else { 'disabled' }
     $advColor = if ($cfg.AdvancedMode) { 'Yellow' } else { 'DarkGray' }
     Write-MenuItem 'A' "Advanced mode [$advState]" 'Unlock diagnostic options (BSOD test, etc.)'
     Write-Host ""

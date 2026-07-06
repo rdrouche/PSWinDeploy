@@ -222,6 +222,7 @@ function Invoke-StepHandler {
         'Reboot'          = 'Invoke-TaskReboot'
         'Cleanup'         = 'Invoke-TaskCleanup'
         'ShowWizard'      = 'Invoke-TaskShowWizard'
+        'Notify'          = 'Invoke-TaskNotify'
         'CopyFiles'       = 'Invoke-TaskCopyFiles'
         'SetRegistry'     = 'Invoke-TaskSetRegistry'
         'SetComputerName' = 'Invoke-TaskSetComputerName'

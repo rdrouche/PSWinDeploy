@@ -606,7 +606,7 @@ function Select-TargetDisk {
     $nonSys = @($disks | Where-Object { -not $_.IsBoot })
     if (@($nonSys).Count -eq 1) {
         $d = $nonSys[0]
-        Write-Host "  Disque $($d.Number) selectionne automatiquement." -ForegroundColor Green
+        Write-Host "  Disk $($d.Number) selected automatically." -ForegroundColor Green
         return $d.Number
     }
 

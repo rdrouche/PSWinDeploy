@@ -468,12 +468,14 @@ app.use("/api", requireAuth, async (req, res) => {
     return res.status(503).json({ success: false, error: "URL_API_PSWINDEPLOY non configuree dans le conteneur." })
   }
   const target = `${API_URL}${req.originalUrl}`   // conserve /api/...
-  const headers = { "Content-Type": "application/json" }
+  // charset=utf-8 explicite : evite qu'un caractere non-ASCII (accents, etc.)
+  // soit mal decode cote API si le service ne defaute pas en UTF-8.
+  const headers = { "Content-Type": "application/json; charset=utf-8" }
   if (API_TOKEN) headers["X-Deploy-Token"] = API_TOKEN
 
   const init = { method: req.method, headers }
   if (!["GET", "HEAD"].includes(req.method) && req.body !== undefined) {
-    init.body = JSON.stringify(req.body)
+    init.body = Buffer.from(JSON.stringify(req.body), "utf-8")
   }
 
   // Timeout explicite : sans ca, une API injoignable laisse la requete pendre.

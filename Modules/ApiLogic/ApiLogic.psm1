@@ -463,7 +463,7 @@ function Write-DeployReport {
     }
     $id = $id -replace '[^A-Za-z0-9_-]', '_'
 
-    if (-not $Report.ContainsKey('timestamp')) { $Report['timestamp'] = (Get-Date -Format 'o') }
+    if (-not $Report.ContainsKey('timestamp')) { $Report['timestamp'] = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fff') }
 
     # Etat courant (dernier rapport, ecrase)
     $statePath = Join-Path $script:ApiConfig.HistoryPath "current-$id.json"
@@ -506,14 +506,22 @@ function Get-DeployCompleted {
         }
         if ($events.Count -eq 0) { continue }
 
-        # Helper : parser un timestamp ISO en tenant compte de l'OFFSET de fuseau
-        # (DateTimeOffset). Crucial car la P1 (WinPE) peut etre en +01:00 et la
-        # P2 (Windows) en +02:00 -- [datetime]::Parse perdrait l'offset et
-        # donnerait des durees fausses (voire negatives). On compare en UTC.
+        # Helper : parser un timestamp. Les timestamps sont ecrits en HEURE
+        # MURALE brute (sans offset) des deux cotes (WinPE P1 et Windows P2), qui
+        # lisent la meme horloge RTC. On les compare donc directement en heure
+        # murale, SANS conversion de fuseau (sinon on reintroduit un decalage
+        # WinPE/Windows qui donnait des durees a 0s).
+        # On garde une tolerance pour d'anciens timestamps qui auraient un offset
+        # ou un 'Z' : DateTimeOffset les parse, et on prend l'heure locale
+        # correspondante pour rester homogene avec les timestamps sans offset.
         $parseTs = {
             param($ts)
             $dto = [DateTimeOffset]::MinValue
-            if ([DateTimeOffset]::TryParse("$ts", [ref]$dto)) { return $dto.UtcDateTime }
+            $styles = [System.Globalization.DateTimeStyles]::AssumeLocal
+            if ([DateTimeOffset]::TryParse("$ts", [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$dto)) {
+                # DateTime (Kind Unspecified) : l'heure murale telle qu'ecrite.
+                return $dto.DateTime
+            }
             return $null
         }
 
@@ -565,9 +573,12 @@ function Get-DeployCompleted {
         $end   = & $parseTs $last.timestamp
         $durationSec = $null
         if ($start -and $end) {
+            # Tous les timestamps sont ecrits en UTC a la source (voir
+            # Send-DeployReport / Write-DeployReport) et parses en UTC
+            # (AssumeUniversal). La difference est donc directement la duree.
             $d = [math]::Round(($end - $start).TotalSeconds)
-            # Garde-fou : une duree negative ne devrait plus arriver, mais par
-            # securite on la borne a 0 (jamais de temps negatif affiche).
+            # Garde-fou : jamais de duree negative affichee (donnees historiques
+            # anterieures a la normalisation UTC pouvaient etre incoherentes).
             $durationSec = [math]::Max(0, $d)
         }
 

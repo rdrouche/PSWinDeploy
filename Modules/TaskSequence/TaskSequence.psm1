@@ -584,7 +584,7 @@ function Write-DeployResetScript {
     $script = @'
 # Reset-PSWinDeploy.ps1 -- desarme l'autologon et la reprise PSWinDeploy.
 # A lancer en tant qu'administrateur si le deploiement reboucle ou se bloque.
-Write-Host "Desarmement de l'autologon et de la reprise PSWinDeploy..." -ForegroundColor Yellow
+Write-Host "Disarming PSWinDeploy autologon and resume..." -ForegroundColor Yellow
 $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 try { Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue } catch {}
 try { Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue } catch {}
@@ -1589,6 +1589,39 @@ function Invoke-StepCleanup {
     return @{ Success = $true; RebootRequired = $false }
 }
 
+function Invoke-StepNotify {
+    <#
+    .SYNOPSIS Action de sequence : envoie une notification email de fin via le
+        SERVEUR (l'API). Transmet le nom de la machine ; l'email est envoye
+        cote serveur (le poste ne fait aucun envoi SMTP). Best-effort : n'echoue
+        jamais la sequence si l'API est injoignable ou les notifications
+        desactivees.
+    .DESCRIPTION
+        A placer typiquement en fin de sequence. Parametres optionnels du step :
+          success : 'true'/'false' (defaut true) -- statut a afficher dans le mail.
+        Le nom de l'ordinateur est celui de la machine ($env:COMPUTERNAME).
+    #>
+    param([PSCustomObject]$Step)
+    Write-TSLog "Sending end-of-deployment notification (server-side email)..." -Level STEP -StepId $Step.id
+
+    # Statut optionnel depuis le step.
+    $successParam = Get-StepParam $Step 'success'
+    $ok = $true
+    if ($successParam) { $ok = ("$successParam" -match '^(true|1|yes|on)$') }
+
+    $drMod = Join-Path $PSScriptRoot '..\DeployReport\DeployReport.psm1'
+    if (Test-Path $drMod) { Import-Module $drMod -Force -EA SilentlyContinue }
+
+    if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
+        $sent = Send-DeployDoneMail -Success $ok
+        if ($sent) { Write-TSLog "Notification signal sent to the API." -Level SUCCESS -StepId $Step.id }
+        else { Write-TSLog "Could not reach the API for the notification (skipped)." -Level INFO -StepId $Step.id }
+    } else {
+        Write-TSLog "Send-DeployDoneMail not available -- notification skipped." -Level WARN -StepId $Step.id
+    }
+    return @{ Success = $true }
+}
+
 function Invoke-StepShowWizard {
     <#
     .SYNOPSIS Ouvre l'assistant post-installation (menu principal) depuis une
@@ -2018,7 +2051,13 @@ function Invoke-DeployStep {
             }
             'Cleanup'         { Invoke-StepCleanup     -Step $Step | Out-Null }
             'ShowWizard'      { Invoke-StepShowWizard  -Step $Step | Out-Null }
-            default { Write-TSLog "Type de step inconnu : $($Step.type)" -Level WARN }
+            'Notify'          { Invoke-StepNotify      -Step $Step | Out-Null }
+            default {
+                # Type non reconnu : afficher la valeur exacte entre crochets pour
+                # reperer d'eventuels caracteres invisibles ou une corruption.
+                $rawType = "$($Step.type)"
+                Write-TSLog "Unknown step type: [$rawType] (length=$($rawType.Length)) -- step ignored" -Level WARN -StepId $Step.id
+            }
         }
 
         $State.completedSteps += $Step.id

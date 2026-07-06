@@ -754,7 +754,7 @@ function Invoke-ProfileSelector {
     Clear-Host
     Write-Host ""
     Write-Host "  +-----------------------------------------------------+" -ForegroundColor Cyan
-    Write-Host "  |         PSWinDeploy -- Selection du profil           |" -ForegroundColor Cyan
+    Write-Host "  |         PSWinDeploy -- Profile selection             |" -ForegroundColor Cyan
     Write-Host "  +-----------------------------------------------------+" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Profils disponibles :" -ForegroundColor White
@@ -784,7 +784,7 @@ function Invoke-ProfileSelector {
 
     $choice = $null
     while ($null -eq $choice) {
-        Write-Host "  Choisissez un profil [1-$($profiles.Count)] : " -ForegroundColor Cyan -NoNewline
+        Write-Host "  Choose a profile [1-$($profiles.Count)]: " -ForegroundColor Cyan -NoNewline
         $in = Read-Host
         if ($in -match '^\d+$' -and [int]$in -ge 1 -and [int]$in -le $profiles.Count) {
             $choice = [int]$in - 1
@@ -795,7 +795,7 @@ function Invoke-ProfileSelector {
 
     $selected = $profiles[$choice]
     Write-Host ""
-    Write-Host "  Profil selectionne : $($selected.name)" -ForegroundColor Green
+    Write-Host "  Profile selected: $($selected.name)" -ForegroundColor Green
     Write-Host ""
     return $selected
 }

@@ -107,7 +107,7 @@ Start-PodeServer -Threads 2 {
     }
     Set-PodeState -Name 'ApiToken' -Value $apiToken | Out-Null
     if ($apiToken) {
-        Write-Host "  Securite API : token requis pour les modifications (POST/PUT/DELETE)." -ForegroundColor Yellow
+        Write-Host "  API security: token required for changes (POST/PUT/DELETE)." -ForegroundColor Yellow
     } else {
         Write-Host "  API security: open access (no apiToken configured)." -ForegroundColor DarkGray
     }
@@ -877,7 +877,7 @@ Start-PodeServer -Threads 2 {
 
     Add-PodeRoute -Method Get -Path '/api/health' -ScriptBlock {
         # Version lue dynamiquement depuis le fichier VERSION (source unique).
-        $ver = '0.8.0'
+        $ver = '0.9.0'
         try {
             $vf = Join-Path (Get-PodeState -Name 'ProjectRoot') 'VERSION'
             if (Test-Path $vf -EA SilentlyContinue) { $ver = (Get-Content $vf -Raw).Trim() }
@@ -890,17 +890,165 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # GET /api/config -- lecture seule de PSWinDeploy.psd1 (secrets masques).
+    # Renvoie la configuration en JSON pour l'affichage web. Les champs sensibles
+    # (tokens, mots de passe) sont remplaces par '********' et ne sont JAMAIS
+    # transmis en clair. Lecture seule : aucune ecriture ici.
+    Add-PodeRoute -Method Get -Path '/api/config' -ScriptBlock {
+        try {
+            $root = Get-PodeState -Name 'ProjectRoot'
+            $cfgPath = Join-Path $root 'PSWinDeploy.psd1'
+            if (-not (Test-Path $cfgPath)) {
+                Set-PodeResponseStatus -Code 404
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'PSWinDeploy.psd1 not found' }
+                return
+            }
+            $cfg = Import-PowerShellDataFile $cfgPath
+
+            # Liste des cles sensibles a masquer (comparaison insensible a la casse).
+            # On masque tout ce qui ressemble a un secret : token, password, secret, key.
+            $sensitivePatterns = @('token','password','secret','apikey','pass')
+            $masked = @{}
+            foreach ($k in $cfg.Keys) {
+                $val = $cfg[$k]
+                $isSensitive = $false
+                foreach ($pat in $sensitivePatterns) {
+                    if ("$k".ToLower() -like "*$pat*") { $isSensitive = $true; break }
+                }
+                if ($isSensitive) {
+                    # Masquer mais indiquer si une valeur est presente ou vide.
+                    $masked[$k] = if ($val) { '********' } else { '' }
+                }
+                elseif ($val -is [hashtable]) {
+                    # Sous-hashtable (ex: ApiPaths) : masquer recursivement les cles sensibles.
+                    $sub = @{}
+                    foreach ($sk in $val.Keys) {
+                        $isSub = $false
+                        foreach ($pat in $sensitivePatterns) { if ("$sk".ToLower() -like "*$pat*") { $isSub = $true; break } }
+                        $sub[$sk] = if ($isSub) { if ($val[$sk]) { '********' } else { '' } } else { $val[$sk] }
+                    }
+                    $masked[$k] = $sub
+                }
+                else {
+                    $masked[$k] = $val
+                }
+            }
+
+            Write-PodeJsonResponse -Value @{ success = $true; config = $masked }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # PUT /api/config/email -- edite UNIQUEMENT la section notification email de
+    # PSWinDeploy.psd1. Backup horodate (Config-Backup\PSWinDeploy.<stamp>.bak),
+    # edition chirurgicale, validation avant swap (l'original n'est remplace que
+    # si le nouveau fichier est valide). Voir module ConfigWriter.
+    Add-PodeRoute -Method Put -Path '/api/config/email' -ScriptBlock {
+        try {
+            $root = Get-PodeState -Name 'ProjectRoot'
+            $cfgPath = Join-Path $root 'PSWinDeploy.psd1'
+            $mod = "$(Get-PodeState -Name ModulesRoot)\ConfigWriter\ConfigWriter.psm1"
+            if (-not (Test-Path $mod)) {
+                Set-PodeResponseStatus -Code 404
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'ConfigWriter module not found' }
+                return
+            }
+            Import-Module $mod -Force
+
+            # Liste blanche : on ne prend QUE les cles email du corps de requete.
+            $allowed = @('NotifEmail','SMTP_FROM','SMTP_TO','SMTP_Server','SMTP_Port','SMTP_SECURE','SMTP_USER','SMTP_PASSWORD')
+            $data = $WebEvent.Data
+            $values = @{}
+            foreach ($k in $allowed) {
+                if ($null -ne $data.$k) { $values[$k] = $data.$k }
+            }
+            if ($values.Count -eq 0) {
+                Set-PodeResponseStatus -Code 400
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'No email field provided' }
+                return
+            }
+
+            $res = Set-EmailConfig -ConfigPath $cfgPath -Values $values
+            if ($res.success) {
+                Write-PodeJsonResponse -Value @{ success = $true; backup = $res.backup }
+            } else {
+                Set-PodeResponseStatus -Code 500
+                Write-PodeJsonResponse -Value @{ success = $false; error = $res.error; backup = $res.backup }
+            }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
     # =======================================================
     # ROUTE NOTIFICATIONS
     # =======================================================
 
-    # POST /api/notify/test -- teste les canaux de notification configures
+    # POST /api/notify/test -- envoie un email de test via MailNotify (config plate).
     Add-PodeRoute -Method Post -Path '/api/notify/test' -ScriptBlock {
         try {
-            Import-Module "$(Get-PodeState -Name ModulesRoot)\Notify\Notify.psm1" -Force
-            $channel = if ($WebEvent.Data.channel) { $WebEvent.Data.channel } else { 'All' }
-            Test-NotifyConfig -Channel $channel
-            Write-PodeJsonResponse -Value @{ success = $true; channel = $channel }
+            $mod = "$(Get-PodeState -Name ModulesRoot)\MailNotify\MailNotify.psm1"
+            if (-not (Test-Path $mod)) {
+                Set-PodeResponseStatus -Code 404
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'MailNotify module not found' }
+                return
+            }
+            Import-Module $mod -Force
+            if (-not (Test-MailNotifyEnabled)) {
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'Email notifications disabled or incomplete (check NotifEmail and SMTP_* in PSWinDeploy.psd1)' }
+                return
+            }
+            $sent = Send-DeployMail -Result ([PSCustomObject]@{ ComputerName = $env:COMPUTERNAME; Success = $true; Sequence = 'TEST'; DurationSec = 0 })
+            Write-PodeJsonResponse -Value @{ success = [bool]$sent }
+        } catch {
+            Set-PodeResponseStatus -Code 500
+            Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
+        }
+    }
+
+    # POST /api/notify/deploy-done -- signal de fin de deploiement envoye par le
+    # POSTE CLIENT. L'email est envoye ICI, cote SERVEUR, via MailNotify (le
+    # serveur detient la config SMTP). Le client ne fait plus aucun envoi SMTP :
+    # cela evite d'autoriser le SMTP sortant depuis tout le reseau de deploiement
+    # et garde le secret SMTP sur le serveur uniquement.
+    # Corps attendu (aucun secret) : { computerName, success, sequence }
+    Add-PodeRoute -Method Post -Path '/api/notify/deploy-done' -ScriptBlock {
+        try {
+            $mod = "$(Get-PodeState -Name ModulesRoot)\MailNotify\MailNotify.psm1"
+            if (-not (Test-Path $mod)) {
+                Set-PodeResponseStatus -Code 404
+                Write-PodeJsonResponse -Value @{ success = $false; error = 'MailNotify module not found' }
+                return
+            }
+            Import-Module $mod -Force
+
+            # Notifications desactivees ou incompletes : on ne fait rien, mais on
+            # renvoie 200 (ce n'est pas une erreur cote client -- best-effort).
+            if (-not (Test-MailNotifyEnabled)) {
+                Write-PodeJsonResponse -Value @{ success = $false; skipped = $true; reason = 'email disabled or incomplete' }
+                return
+            }
+
+            $data = $WebEvent.Data
+            $machine = if ($data.computerName) { "$($data.computerName)" } else { 'unknown' }
+            # success : true par defaut, false seulement si explicitement fourni.
+            $ok = $true
+            if ($null -ne $data.success) {
+                $ok = ("$($data.success)" -eq 'True' -or $data.success -eq $true)
+            }
+            $seq = if ($data.sequence) { "$($data.sequence)" } else { 'n/a' }
+
+            # Duree non transmise (choix : pas de duree dans le mail).
+            $sent = Send-DeployMail -Result ([PSCustomObject]@{
+                ComputerName = $machine
+                Success      = $ok
+                Sequence     = $seq
+                DurationSec  = $null
+            })
+            Write-PodeJsonResponse -Value @{ success = [bool]$sent }
         } catch {
             Set-PodeResponseStatus -Code 500
             Write-PodeJsonResponse -Value @{ success = $false; error = $_.ToString() }
@@ -908,7 +1056,7 @@ Start-PodeServer -Threads 2 {
     }
 
     Write-Host ""
-    Write-Host "  PSWinDeploy API demarree sur le port $Port" -ForegroundColor Green
+    Write-Host "  PSWinDeploy API started on port $Port" -ForegroundColor Green
     Write-Host "  http://localhost:$Port/api/health" -ForegroundColor Cyan
     Write-Host ""
 }

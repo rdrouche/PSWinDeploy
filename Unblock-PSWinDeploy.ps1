@@ -34,12 +34,12 @@ if (-not $Path) {
 }
 
 Write-Host ""
-Write-Host "  PSWinDeploy -- Deblocage des fichiers" -ForegroundColor Cyan
-Write-Host "  Dossier : $Path" -ForegroundColor Gray
+Write-Host "  PSWinDeploy -- Unblocking files" -ForegroundColor Cyan
+Write-Host "  Folder: $Path" -ForegroundColor Gray
 Write-Host ""
 
 if (-not (Test-Path $Path)) {
-    Write-Host "  [X] Dossier introuvable : $Path" -ForegroundColor Red
+    Write-Host "  [X] Folder not found: $Path" -ForegroundColor Red
     exit 1
 }
 
@@ -82,17 +82,17 @@ foreach ($ext in $extensions) {
 }
 
 Write-Host ""
-Write-Host "  $total fichier(s) analyses" -ForegroundColor Gray
+Write-Host "  $total file(s) scanned" -ForegroundColor Gray
 if ($blocked -eq 0) {
     Write-Host "  No blocked file -- already unblocked or extracted locally" -ForegroundColor Cyan
 } else {
-    Write-Host "  $blocked fichier(s) bloques detectes" -ForegroundColor Yellow
-    Write-Host "  $fixed fichier(s) debloque(s)" -ForegroundColor Green
+    Write-Host "  $blocked blocked file(s) detected" -ForegroundColor Yellow
+    Write-Host "  $fixed file(s) unblocked" -ForegroundColor Green
 }
 
 Write-Host ""
-Write-Host "  Conseil : pour eviter ce probleme a l'avenir," -ForegroundColor DarkGray
-Write-Host "  debloquer le .zip avant d'extraire :" -ForegroundColor DarkGray
-Write-Host "    Clic-droit sur le .zip -> Proprietes -> Debloquer" -ForegroundColor DarkGray
+Write-Host "  Tip: to avoid this problem in the future," -ForegroundColor DarkGray
+Write-Host "  unblock the .zip before extracting:" -ForegroundColor DarkGray
+Write-Host "    Right-click the .zip -> Properties -> Unblock" -ForegroundColor DarkGray
 Write-Host "    Ou : Unblock-File 'PSWinDeploy_v0.7.0.zip'" -ForegroundColor Gray
 Write-Host ""

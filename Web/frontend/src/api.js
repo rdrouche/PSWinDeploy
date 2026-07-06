@@ -33,6 +33,13 @@ export const api = {
   logout: () => call("POST", "/auth/logout"),
   me: () => call("GET", "/auth/me"),
 
+  // Configuration : lit PSWinDeploy.psd1 via l'API (secrets masques).
+  getConfig: () => call("GET", "/api/config"),
+  // Ecrit la section email (backup + validation cote serveur).
+  updateEmailConfig: (values) => call("PUT", "/api/config/email", values),
+  // Envoie un email de test via MailNotify (config email cote serveur).
+  testMail: () => call("POST", "/api/notify/test"),
+
   // -- Donnees (le BFF proxifie vers l'API PowerShell en injectant le token) --
   catalogue: () => call("GET", "/api/catalogue"),
   saveApp: (app) => call("POST", "/api/catalogue/app", app),

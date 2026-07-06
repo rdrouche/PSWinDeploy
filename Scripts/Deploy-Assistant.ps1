@@ -383,11 +383,11 @@ while ($true) {
                 $s = Import-PowerShellDataFile $f.FullName
                 $nb = if ($s.Steps) { @($s.Steps).Count } else { 0 }
                 Write-Host "    $($f.Name)" -ForegroundColor White -NoNewline
-                Write-Host "  ($nb etape(s))" -ForegroundColor DarkGray
+                Write-Host "  ($nb step(s))" -ForegroundColor DarkGray
             } catch { Write-Warn "    $($f.Name) (illisible)" }
         }
         Write-Host ""
-        Write-Host "  [?]  Entree pour continuer..." -ForegroundColor White -NoNewline
+        Write-Host "  [?]  Enter to continue..." -ForegroundColor White -NoNewline
         Read-Host | Out-Null
         continue
     }
@@ -462,7 +462,7 @@ while ($true) {
     Write-OK "Sequence enregistree : $outPath"
     Write-Info "$($steps.Count) etape(s)."
     Write-Host ""
-    Write-Host "  [?]  Entree pour continuer..." -ForegroundColor White -NoNewline
+    Write-Host "  [?]  Enter to continue..." -ForegroundColor White -NoNewline
     Read-Host | Out-Null
 }
 

@@ -16,6 +16,7 @@ const STRINGS = {
   "nav.drivers": "Drivers",
   "nav.monitor": "Monitoring",
   "nav.stats": "Statistics",
+  "nav.config": "Configuration",
   "nav.logout": "Log out",
   "nav.connected": "connected",
 

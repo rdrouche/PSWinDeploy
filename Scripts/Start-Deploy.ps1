@@ -340,13 +340,13 @@ function Invoke-ScratchWizard {
         Write-OK "Image : $imgName  Edition $selectedIndex"
     } else {
         Write-Warn "Aucune image WIM sur $imgSharePath"
-        Write-Host "  [?]  Chemin UNC vers le .wim : " -ForegroundColor Yellow -NoNewline
+        Write-Host "  [?]  UNC path to the .wim: " -ForegroundColor Yellow -NoNewline
         $selectedWim = (Read-Host).Trim().Trim('"').Trim("'")
     }
 
     # ?? 2. NOM MACHINE ???????????????????????????????????????????????????????
     Write-Host ""; Write-Step "Step 2/6 -- Identity"
-    Write-Host "  [i]  Laissez VIDE pour que Windows genere un nom aleatoire unique." -ForegroundColor DarkGray
+    Write-Host "  [i]  Leave EMPTY for Windows to generate a unique random name." -ForegroundColor DarkGray
     Write-Host "       (recommended for multiple deployments with AD join)" -ForegroundColor DarkGray
     Write-Host "  [?]  Machine name [auto]: " -ForegroundColor Yellow -NoNewline
     $machineName = (Read-Host).Trim()
@@ -397,21 +397,21 @@ function Invoke-ScratchWizard {
         Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Yellow
         Write-Host "  |              OPTIONS AVANCEES (diagnostic)                |" -ForegroundColor Yellow
         Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Yellow
-        Write-Host "  Ces options servent a diagnostiquer les problemes de boot (BSOD)." -ForegroundColor DarkGray
+        Write-Host "  These options help diagnose boot problems (BSOD)." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "  [?]  Desactiver l'autologon unattend ? [o/N]" -ForegroundColor Yellow -NoNewline
-        Write-Host "  (teste si l'autologon cause le BSOD) : " -ForegroundColor DarkGray -NoNewline
+        Write-Host "  (tests whether autologon causes the BSOD): " -ForegroundColor DarkGray -NoNewline
         $advNoAutoLogon = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
         Write-Host "  [?]  Sauter completement l'unattend ? [o/N]" -ForegroundColor Yellow -NoNewline
-        Write-Host "  (deploie le WIM brut, OOBE standard) : " -ForegroundColor DarkGray -NoNewline
+        Write-Host "  (deploys the raw WIM, standard OOBE): " -ForegroundColor DarkGray -NoNewline
         $advSkipUnattend = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
-        Write-Host "  [?]  Deployer SANS lancer la phase 2 ? [o/N]" -ForegroundColor Yellow -NoNewline
+        Write-Host "  [?]  Deploy WITHOUT starting phase 2? [y/N]" -ForegroundColor Yellow -NoNewline
         Write-Host "  (autologon OK, mais ne lance pas Start-Deploy -Resume) : " -ForegroundColor DarkGray -NoNewline
         $advNoPhase2 = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
-        Write-Host "  [?]  Copier l'unattend genere pour debug ? [o/N]" -ForegroundColor Yellow -NoNewline
+        Write-Host "  [?]  Copy the generated unattend for debugging? [y/N]" -ForegroundColor Yellow -NoNewline
         Write-Host "  (saves a timestamped copy on the share): " -ForegroundColor DarkGray -NoNewline
         $advCopyUnattend = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
@@ -419,7 +419,7 @@ function Invoke-ScratchWizard {
         Write-Host "  (you will run 'wpeutil reboot' yourself -- diagnostic): " -ForegroundColor DarkGray -NoNewline
         $advNoReboot = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
-        Write-Host "  --- Diagnostic BSOD : desactiver des operations suspectes ---" -ForegroundColor DarkCyan
+        Write-Host "  --- BSOD diagnostic: disable suspicious operations ---" -ForegroundColor DarkCyan
         Write-Host "  [?]  NE PAS copier Deploy sur la cible (Copy-DeployToTarget) ? [o/N] : " -ForegroundColor Yellow -NoNewline
         $advNoCopyDeploy = (Read-Host).Trim().ToLower() -in @('o','oui','y','yes')
 
@@ -489,7 +489,7 @@ function Invoke-ScratchWizard {
     if ($driverModelPath) {
         Write-Host "  Drivers : $(Split-Path $driverModelPath -Leaf)" -ForegroundColor White
     }
-    Write-Host "  Disque  : $diskNum  [SERA EFFACE]" -ForegroundColor Red
+    Write-Host "  Disk    : $diskNum  [WILL BE ERASED]" -ForegroundColor Red
     Write-Host ""
     Write-Host "  [?]  CONFIRMER ? [o/N] : " -ForegroundColor Red -NoNewline
     if (-not ((Read-Host).Trim().ToLower() -in @('o','oui','y','yes'))) {
@@ -814,7 +814,7 @@ function Write-Banner {
     # Version lue dynamiquement depuis le fichier VERSION (source unique).
     # En WinPE/deploiement, le projet peut etre a divers emplacements : on teste
     # plusieurs chemins. Fallback sur la derniere version connue.
-    $v = '0.8.0'
+    $v = '0.9.0'
     foreach ($vf in @(
         (Join-Path $PSScriptRoot '..\VERSION'),
         (Join-Path $PSScriptRoot '..\..\VERSION'),
@@ -839,7 +839,7 @@ function Write-Banner {
     Write-Host "  ##|     #######|+###+###++##|##| +####|######++#######+##|     #######++######++   ##|   " -ForegroundColor DarkCyan
     Write-Host "  +=+     +======+ +==++==+ +=++=+  +===++=====+ +======++=+     +======+ +=====+    +=+   " -ForegroundColor DarkCyan
     Write-Host ""
-    Write-Host "  Remplacement MDT -- Deploiement Windows moderne en PowerShell   v$v" -ForegroundColor Gray
+    Write-Host "  MDT replacement -- Modern Windows deployment in PowerShell   v$v" -ForegroundColor Gray
     Write-Host ""
 }
 
@@ -940,7 +940,7 @@ function Select-SequenceFile {
     Write-Host "  +----------------------------------------------------------+" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  [S] Deployment  -- Interactive assistant (OS, disk, domain)" -ForegroundColor Yellow
-    Write-Host "       La post-installation (apps, MAJ, scripts) se fait en phase 2" -ForegroundColor DarkGray
+    Write-Host "       Post-installation (apps, updates, scripts) happens in phase 2" -ForegroundColor DarkGray
     Write-Host "       via sequences (by-name / by-mac / _default) or the assistant." -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [D] Load drivers (from a 2nd ISO / USB key)" -ForegroundColor Cyan
@@ -1166,7 +1166,7 @@ try {
         }
         Write-Host ""
         Write-OK "Assistant finished."
-        Write-Host "  Appuyez sur Entree pour fermer cette fenetre..." -ForegroundColor Yellow
+        Write-Host "  Press Enter to close this window..." -ForegroundColor Yellow
         [void](Read-Host)
         exit 0
     }
@@ -1486,7 +1486,7 @@ try {
             Write-Host "  +----------------------------------------------------------+" -ForegroundColor Cyan
             Write-Host ""
             Write-Host "  Network shares are mounted and accessible." -ForegroundColor Gray
-            Write-Host "  Tu es dans un shell PowerShell interactif." -ForegroundColor Gray
+            Write-Host "  You are in an interactive PowerShell shell." -ForegroundColor Gray
             Write-Host ""
             Write-Host "  - To return to the deployment menu: type  exit" -ForegroundColor DarkGray
             Write-Host "  - To restart the deployment directly:" -ForegroundColor DarkGray
@@ -1635,7 +1635,7 @@ try {
     Write-Warn "  The deployment failed."
     Write-Warn "  Consultez les logs : $DeployRoot\Logs\deploy.log"
     Write-Host ""
-    Write-Host "  Appuyez sur une touche pour ouvrir une console de depannage..." -ForegroundColor DarkGray
+    Write-Host "  Press any key to open a troubleshooting console..." -ForegroundColor DarkGray
     $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     # Ouvre un shell PowerShell interactif pour diagnostic
     Start-Process powershell.exe -ArgumentList '-NoExit -NoProfile' -Wait

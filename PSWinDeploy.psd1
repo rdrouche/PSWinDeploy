@@ -1,6 +1,6 @@
 ﻿@{
     # -- Version ------------------------------------------
-    Version         = '0.8.0'
+    Version         = '0.9.0'
     ProjectName     = 'PSWinDeploy'
 
     # -- Debug --------------------------------------------
@@ -102,35 +102,21 @@
     ScriptsRoot     = 'C:\Deploy\Scripts'
 }
 
-# -- Notifications ------------------------------------------------------------
-# Decommenter et adapter les sections souhaitees
+# -- Email notification (end of deployment) -----------------------------------
+# Simple flat SMTP config. Sent once when the operator finishes the deployment
+# (final cleanup). Any missing key simply disables the feature -- it never
+# breaks the deployment. If SMTP_USER / SMTP_PASSWORD are empty => no auth.
+# SMTP_SECURE: 'Plain' (no TLS), 'TLS' (STARTTLS, e.g. 587), 'SSL' (direct, 465).
+# SECURITY NOTE: SMTP_PASSWORD is stored in cleartext here (simplicity trade-off).
+    NotifEmail    = $false
+    SMTP_FROM     = ''
+    SMTP_TO       = ''                    # 'a@corp.local' or 'a@corp.local,b@corp.local'
+    SMTP_Server   = ''
+    SMTP_Port     = 587
+    SMTP_SECURE   = 'TLS'                  # 'Plain' | 'TLS' | 'SSL'
+    SMTP_USER     = ''                     # empty => no authentication
+    SMTP_PASSWORD = ''                     # empty => no authentication
 
-# Notifications  = @{
-#
-#     Mail = @{
-#         Enabled    = $true
-#         SmtpServer = 'smtp.corp.local'
-#         Port       = 587
-#         UseTls     = $true
-#         From       = 'pswindex@corp.local'
-#         To         = @('it-admin@corp.local')
-#         ToOnError  = @('it-admin@corp.local','it-manager@corp.local')
-#         SmtpUser   = 'pswindex@corp.local'
-#         SmtpPasswordKey = 'smtpPassword'   # cle dans secrets.vault
-#     }
-#
-#     Teams = @{
-#         Enabled    = $true
-#         WebhookUrl = 'https://outlook.office.com/webhook/xxx/IncomingWebhook/yyy'
-#         # ou lire depuis vault :
-#         # WebhookKey = 'teamsWebhook'
-#     }
-#
-#     Webhook = @{
-#         Enabled = $false
-#         Url     = 'https://hooks.slack.com/services/xxx'
-#     }
-# }
 
 # -- Compte reseau WinPE ------------------------------------------------------
 # Compte dedie acces lecture sur les partages de deploiement depuis WinPE.

@@ -40,7 +40,7 @@ function Get-PSWDVersion {
         }
     }
     # Fallback : derniere version connue figee ici (mise a jour par le bump).
-    $script:CachedVersion = '0.8.0'
+    $script:CachedVersion = '0.9.0'
     return $script:CachedVersion
 }
 
@@ -50,7 +50,7 @@ function Get-PSWDVersion {
 # -----------------------------------------------------------------------------
 
 $script:Defaults = @{
-    Version          = '0.8.0'
+    Version          = '0.9.0'
     ProjectName      = 'PSWinDeploy'
 
     AdkPath          = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'

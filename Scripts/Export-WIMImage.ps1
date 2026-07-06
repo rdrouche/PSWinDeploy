@@ -482,12 +482,12 @@ if (-not $OutputPath) {
             Write-OK "Partage Images PSWinDeploy : $OutputPath"
         } else {
             Write-Warn "Partage configure ($configImageShare) inaccessible"
-            Write-Host "  [?]  Dossier de destination [$(Split-Path $wimSourcePath -Parent)] : " -ForegroundColor White -NoNewline
+            Write-Host "  [?]  Destination folder [$(Split-Path $wimSourcePath -Parent)]: " -ForegroundColor White -NoNewline
             $inp = (Read-Host).Trim().Trim('"').Trim("'").Trim()
             $OutputPath = if ($inp) { $inp } else { Split-Path $wimSourcePath -Parent }
         }
     } else {
-        Write-Host "  [?]  Dossier de destination [$(Split-Path $wimSourcePath -Parent)] : " -ForegroundColor White -NoNewline
+        Write-Host "  [?]  Destination folder [$(Split-Path $wimSourcePath -Parent)]: " -ForegroundColor White -NoNewline
         $inp = (Read-Host).Trim().Trim('"').Trim("'").Trim()
         $OutputPath = if ($inp) { $inp } else { Split-Path $wimSourcePath -Parent }
     }
@@ -508,7 +508,7 @@ if (-not $OutputName -and $indicesToExport.Count -eq 1) {
     Write-Host ""
     Write-Host "  Suggested file name: " -ForegroundColor White -NoNewline
     Write-Host $defaultName -ForegroundColor Cyan
-    Write-Host "  [?]  Entree pour accepter, ou tapez un autre nom (sans accent) : " -ForegroundColor White -NoNewline
+    Write-Host "  [?]  Enter to accept, or type another name: " -ForegroundColor White -NoNewline
     $nameInput = (Read-Host).Trim().Trim('"').Trim("'").Trim()
     if ($nameInput) {
         # Ajouter .wim si absent

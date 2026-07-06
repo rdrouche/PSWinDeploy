@@ -251,14 +251,14 @@ function Invoke-SimpleDeploy {
     $hasPwd = $UnattendParams.ContainsKey('LocalAdminPassword')
     Write-Host ""
     Write-Host "  +========================================================+" -ForegroundColor Green
-    Write-Host "  |              DEPLOIEMENT TERMINE AVEC SUCCES            |" -ForegroundColor Green
+    Write-Host "  |              DEPLOYMENT COMPLETED SUCCESSFULLY          |" -ForegroundColor Green
     Write-Host "  +========================================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Recapitulatif :" -ForegroundColor White
-    Write-Host "    - Disque        : $DiskNumber (partitionne GPT/UEFI)" -ForegroundColor Gray
-    Write-Host "    - Windows       : applique sur W: (futur C:)" -ForegroundColor Gray
+    Write-Host "    - Disk          : $DiskNumber (partitioned GPT/UEFI)" -ForegroundColor Gray
+    Write-Host "    - Windows       : applied to W: (future C:)" -ForegroundColor Gray
     Write-Host "    - Nom machine   : $cn" -ForegroundColor Gray
-    Write-Host "    - Mot de passe  : $(if($hasPwd){'depuis le vault'}else{'defaut du module (vault non lu)'})" -ForegroundColor $(if($hasPwd){'Gray'}else{'Yellow'})
+    Write-Host "    - Password      : $(if($hasPwd){'from the vault'}else{'module default (vault not read)'})" -ForegroundColor $(if($hasPwd){'Gray'}else{'Yellow'})
     Write-Host "    - Bootloader    : configure (UEFI)" -ForegroundColor Gray
     Write-Host "    - Phase 2       : $(if($CopyDeploy){'preparee (C:\Deploy)'}else{'non preparee'})" -ForegroundColor Gray
     if ($script:SimpleLogFile) {
@@ -268,15 +268,15 @@ function Invoke-SimpleDeploy {
 
     if ($NoReboot) {
         Write-Host "  >> MODE SANS REBOOT AUTO <<" -ForegroundColor Yellow
-        Write-Host "     La machine NE redemarre PAS automatiquement." -ForegroundColor Yellow
-        Write-Host "     Pour demarrer Windows, tape :  " -ForegroundColor White -NoNewline
+        Write-Host "     The machine does NOT reboot automatically." -ForegroundColor Yellow
+        Write-Host "     To start Windows, type:  " -ForegroundColor White -NoNewline
         Write-Host "wpeutil reboot" -ForegroundColor Cyan
         Write-Host ""
         Write-SimpleLog "Done (no-reboot mode). Waiting for manual 'wpeutil reboot'." 'OK'
         return
     }
 
-    Write-Host "  La machine va redemarrer pour finaliser l'installation Windows." -ForegroundColor White
+    Write-Host "  The machine will reboot to finalize the Windows installation." -ForegroundColor White
     Write-Host "  (OOBE -> autologon -> phase 2 si configuree)" -ForegroundColor DarkGray
     Write-Host ""
 
@@ -287,7 +287,7 @@ function Invoke-SimpleDeploy {
     }
 
     for ($i = 10; $i -ge 1; $i--) {
-        Write-Host "`r  Redemarrage dans $i secondes...  (Ctrl+C pour annuler)   " -ForegroundColor Yellow -NoNewline
+        Write-Host "`r  Rebooting in $i seconds...  (Ctrl+C to cancel)   " -ForegroundColor Yellow -NoNewline
         Start-Sleep -Seconds 1
     }
     Write-Host ""

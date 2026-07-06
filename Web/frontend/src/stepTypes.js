@@ -95,9 +95,16 @@ export const STEP_TYPES = {
     ],
   },
   ShowWizard: {
-    label: "Assistant post-installation",
+    label: "Post-installation assistant",
     desc: "Shows the interactive assistant on the machine.",
     fields: [],
+  },
+  Notify: {
+    label: "Send notification",
+    desc: "Sends an end-of-deployment email via the server, with the machine name.",
+    fields: [
+      { key: "success", label: "Status", type: "select", options: ["true", "false"], default: "true" },
+    ],
   },
 }
 

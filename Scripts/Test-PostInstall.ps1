@@ -12,9 +12,9 @@ try {
     $file = Join-Path $dir 'test.txt'
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Add-Content -Path $file -Value "[$stamp] Test post-installation OK sur $env:COMPUTERNAME (user=$env:USERNAME)" -Encoding UTF8
-    Write-Host "[TEST] Fichier cree/complete : $file" -ForegroundColor Green
+    Write-Host "[TEST] File created/updated: $file" -ForegroundColor Green
     exit 0
 } catch {
-    Write-Host "[TEST] ERREUR : $_" -ForegroundColor Red
+    Write-Host "[TEST] ERROR: $_" -ForegroundColor Red
     exit 1
 }

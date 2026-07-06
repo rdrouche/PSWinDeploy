@@ -42,15 +42,15 @@ function Login({ onAuthed }) {
         <div className="logo">PSWin<b>Deploy</b></div>
         <div className="sub">deployment console // phase 2</div>
         <label className="field">
-          <span>Identifiant</span>
+          <span>Username</span>
           <input type="text" value={user} onChange={e => setUser(e.target.value)} autoFocus />
         </label>
         <label className="field">
-          <span>Mot de passe</span>
+          <span>Password</span>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} />
         </label>
         <button className="btn primary" style={{ width: "100%", marginTop: 6 }} disabled={busy}>
-          {busy ? "Connexion..." : "Se connecter"}
+          {busy ? "Signing in..." : "Sign in"}
         </button>
         {err && <div className="login-err">{err}</div>}
       </form>
@@ -124,7 +124,7 @@ function CataloguePage({ toast }) {
                     <td className="mono" style={{ color: "var(--text-dim)", fontSize: 12 }}>{methodOf(a)}</td>
                     <td style={{ textAlign: "right" }}>
                       <button className="btn sm ghost" onClick={() => setEditing({ ...a })}>Edit</button>
-                      <button className="btn sm danger" onClick={() => remove(a.Name)} style={{ marginLeft: 6 }}>Retirer</button>
+                      <button className="btn sm danger" onClick={() => remove(a.Name)} style={{ marginLeft: 6 }}>Remove</button>
                     </td>
                   </tr>
                 ))}
@@ -323,7 +323,7 @@ function MonitorPage({ toast, t }) {
             <div className="empty"><p>No deployment in progress.</p><p>Machines appear here as soon as they start phase 2.</p></div>
           ) : (
             <table>
-              <thead><tr><th>Machine</th><th>MAC</th><th>Etat</th><th>Step</th><th style={{ width: 160 }}>Avancement</th></tr></thead>
+              <thead><tr><th>Machine</th><th>MAC</th><th>Status</th><th>Step</th><th style={{ width: 160 }}>Avancement</th></tr></thead>
               <tbody>
                 {list.map((d, i) => (
                   <tr key={i}>
@@ -351,7 +351,7 @@ function MonitorPage({ toast, t }) {
           <div className="empty"><p>{t("monitor.waiting.empty")}</p><p>{t("monitor.waiting.hint")}</p></div>
         ) : (
           <table>
-            <thead><tr><th>Machine</th><th>MAC</th><th>Depuis</th><th>Etat</th><th style={{ width: 220 }}></th></tr></thead>
+            <thead><tr><th>Machine</th><th>MAC</th><th>Depuis</th><th>Status</th><th style={{ width: 220 }}></th></tr></thead>
             <tbody>
               {waiting.map((n, i) => (
                 <tr key={n.Id || i}>
@@ -489,7 +489,7 @@ function SequencesPage({ toast }) {
   return (
     <div>
       <div className="page-head">
-        <h1>Editeur de sequence</h1>
+        <h1>Sequence editor</h1>
         <p>Compose the post-installation sequence step by step, then save it for a machine (by name or by MAC).</p>
       </div>
 
@@ -556,7 +556,7 @@ function SequencesPage({ toast }) {
         </div>
 
         {steps.length === 0 ? (
-          <div className="empty"><p>Sequence vide.</p><p>Add a first step to get started.</p></div>
+          <div className="empty"><p>Empty sequence.</p><p>Add a first step to get started.</p></div>
         ) : steps.map((s, i) => (
           <StepCard key={s.Id} step={s} ord={i + 1}
             onChange={(ns) => updateStep(i, ns)} onRemove={() => removeStep(i)}
@@ -587,7 +587,7 @@ function StepCard({ step, ord, onChange, onRemove, onUp, onDown, catalogue, scri
         <div className="spacer" />
         <button className="btn sm ghost" onClick={e => { e.stopPropagation(); onUp() }}>↑</button>
         <button className="btn sm ghost" onClick={e => { e.stopPropagation(); onDown() }}>↓</button>
-        <button className="btn sm danger" onClick={e => { e.stopPropagation(); onRemove() }}>Retirer</button>
+        <button className="btn sm danger" onClick={e => { e.stopPropagation(); onRemove() }}>Remove</button>
       </div>
       {open && (
         <div className="step-body">
@@ -606,9 +606,9 @@ function StepCard({ step, ord, onChange, onRemove, onUp, onDown, catalogue, scri
               Etape active
             </label>
             <div className="spacer" />
-            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Reboot apres :</span>
+            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Reboot after:</span>
             <select value={step.RebootAfter} onChange={e => onChange({ ...step, RebootAfter: e.target.value })} style={{ width: 130 }}>
-              <option value="Never">Jamais</option>
+              <option value="Never">Never</option>
               <option value="IfRequired">Si requis</option>
               <option value="Always">Toujours</option>
             </select>
@@ -626,7 +626,7 @@ function StepField({ field, value, onChange, catalogue, scripts, drivers }) {
     return (
       <label className="field"><span>{field.label}</span>
         <div className="row wrap" style={{ gap: 6 }}>
-          {catalogue.length === 0 ? <span style={{ color: "var(--text-dim)", fontSize: 12 }}>Catalogue vide.</span> :
+          {catalogue.length === 0 ? <span style={{ color: "var(--text-dim)", fontSize: 12 }}>Empty catalogue.</span> :
             catalogue.map((a, i) => (
               <button key={i} type="button" className={`btn sm ${selected.includes(a.Name) ? "primary" : "ghost"}`}
                 onClick={() => toggle(a.Name)}>{a.Name}</button>
@@ -691,7 +691,7 @@ function CodeViewer({ title, content, onClose }) {
           <span className="mono">{title}</span>
           <button className="btn sm ghost" onClick={onClose}>Close</button>
         </div>
-        <pre className="code-view">{content || "(vide)"}</pre>
+        <pre className="code-view">{content || "(empty)"}</pre>
       </div>
     </div>
   )
@@ -730,7 +730,7 @@ function ScriptsPage({ toast }) {
             <div className="empty"><p>No script found.</p><p>Drop .ps1 files on the Scripts share.</p></div>
           ) : (
             <table>
-              <thead><tr><th>Name</th><th>Chemin relatif</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Relative path</th><th></th></tr></thead>
               <tbody>
                 {scripts.map((s, i) => (
                   <tr key={i}>
@@ -799,11 +799,11 @@ function SequenceListPage({ toast }) {
             <option value="by-mac">By MAC</option>
           </select>
           <div className="spacer" />
-          <button className="btn ghost" onClick={load}>Rafraichir</button>
+          <button className="btn ghost" onClick={load}>Refresh</button>
         </div>
         {loading ? <div className="empty">Loading...</div> :
           shown.length === 0 ? (
-            <div className="empty"><p>Aucune sequence{filter ? " of this type" : ""}.</p><p>Cree un template depuis l'editeur de sequence.</p></div>
+            <div className="empty"><p>Aucune sequence{filter ? " of this type" : ""}.</p><p>Create a template from the sequence editor.</p></div>
           ) : (
             <table>
               <thead><tr><th>Name</th><th>Type</th><th></th></tr></thead>
@@ -905,9 +905,9 @@ function StatsPage({ toast, t }) {
           </div>
 
           <div className="panel">
-            <h2>Durees</h2>
+            <h2>Durations</h2>
             <div className="row wrap" style={{ gap: 30 }}>
-              <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Moyenne</div><div style={{ fontSize: 20, fontWeight: 600 }}>{fmtDur(stats?.AvgDurationSec)}</div></div>
+              <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Average</div><div style={{ fontSize: 20, fontWeight: 600 }}>{fmtDur(stats?.AvgDurationSec)}</div></div>
               <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Minimum</div><div style={{ fontSize: 20, fontWeight: 600, color: "var(--ok)" }}>{fmtDur(stats?.MinDurationSec)}</div></div>
               <div><div style={{ color: "var(--text-dim)", fontSize: 12 }}>Maximum</div><div style={{ fontSize: 20, fontWeight: 600, color: "var(--warn)" }}>{fmtDur(stats?.MaxDurationSec)}</div></div>
             </div>
@@ -918,14 +918,14 @@ function StatsPage({ toast, t }) {
               <h2 style={{ margin: 0 }}>Completed deployments</h2>
               <div className="spacer" />
               <button className="btn ghost" onClick={purge} disabled={busy === "purge"}>{busy === "purge" ? "..." : t("stats.purge")}</button>
-              <button className="btn ghost" onClick={() => { loadPage(page); loadStats() }}>Rafraichir</button>
+              <button className="btn ghost" onClick={() => { loadPage(page); loadStats() }}>Refresh</button>
             </div>
             {completed.length === 0 ? (
               <div className="empty"><p>Aucun deploiement termine{page > 0 ? " on this page" : ""}.</p></div>
             ) : (
               <>
               <table>
-                <thead><tr><th>Machine</th><th>Debut</th><th>Fin</th><th>Duree</th><th>Etat</th><th></th></tr></thead>
+                <thead><tr><th>Machine</th><th>Start</th><th>Fin</th><th>Duration</th><th>Status</th><th></th></tr></thead>
                 <tbody>
                   {completed.map((d, i) => (
                                     <tr key={d.Id || i}>
@@ -948,8 +948,8 @@ function StatsPage({ toast, t }) {
                   {total} deploiement(s) -- page {page + 1} / {totalPages}
                 </span>
                 <div className="spacer" />
-                <button className="btn sm ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0 || loading}>Precedent</button>
-                <button className="btn sm ghost" onClick={() => setPage(p => p + 1)} disabled={page + 1 >= totalPages || loading}>Suivant</button>
+                <button className="btn sm ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0 || loading}>Previous</button>
+                <button className="btn sm ghost" onClick={() => setPage(p => p + 1)} disabled={page + 1 >= totalPages || loading}>Next</button>
               </div>
               </>
             )}
@@ -961,14 +961,174 @@ function StatsPage({ toast, t }) {
 }
 
 // ─── Shell ─────────────────────────────────────────────────
+const EMAIL_KEYS = ["NotifEmail", "SMTP_FROM", "SMTP_TO", "SMTP_Server", "SMTP_Port", "SMTP_SECURE", "SMTP_USER", "SMTP_PASSWORD"]
+
+function ConfigPage({ toast, t }) {
+  if (!t) t = (k) => k
+  const [cfg, setCfg] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState("")
+  const [testing, setTesting] = useState(false)
+  const [email, setEmail] = useState(null)   // formulaire email editable
+  const [saving, setSaving] = useState(false)
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true)
+    const r = await api.getConfig()
+    if (r && r.success && r.config) {
+      setCfg(r.config)
+      // Initialise le formulaire email depuis la config lue.
+      const e = {}
+      EMAIL_KEYS.forEach(k => { e[k] = r.config[k] !== undefined ? r.config[k] : "" })
+      setEmail(e)
+      setErr("")
+    } else setErr((r && r.error) || "Could not read the configuration.")
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { loadConfig() }, [loadConfig])
+
+  async function testMail() {
+    setTesting(true)
+    const r = await api.testMail()
+    setTesting(false)
+    if (r && r.success) toast("Test email sent.")
+    else toast((r && r.error) || "Test email failed.", "err")
+  }
+
+  async function saveEmail() {
+    setSaving(true)
+    const r = await api.updateEmailConfig(email)
+    setSaving(false)
+    if (r && r.success) {
+      toast("Email settings saved. Backup: " + (r.backup || "created"))
+      loadConfig()   // recharge (le mot de passe redevient masque)
+    } else {
+      toast((r && r.error) || "Save failed.", "err")
+    }
+  }
+
+  const setField = (k, v) => setEmail(e => ({ ...e, [k]: v }))
+
+  // Rend une valeur (scalaire, tableau, ou sous-objet) en lecture seule.
+  const renderVal = (v) => {
+    if (v === true) return <span className="badge ok">true</span>
+    if (v === false) return <span className="badge warn">false</span>
+    if (v === "" || v === null || v === undefined) return <span style={{ color: "var(--text-dim)" }}>—</span>
+    if (v === "********") return <span className="mono" style={{ color: "var(--accent)" }}>********</span>
+    if (Array.isArray(v)) return <span className="mono">{v.join(", ")}</span>
+    if (typeof v === "object") {
+      return (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <tbody>
+            {Object.entries(v).map(([k, val]) => (
+              <tr key={k}>
+                <td style={{ padding: "2px 10px 2px 0", color: "var(--text-dim)", whiteSpace: "nowrap" }}>{k}</td>
+                <td style={{ padding: "2px 0" }}>{renderVal(val)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )
+    }
+    return <span className="mono">{String(v)}</span>
+  }
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h1>{t("nav.config")}</h1>
+          <p>Email notifications are editable below. The rest of PSWinDeploy.psd1 is read-only; secrets are masked.</p>
+        </div>
+        <div className="spacer" />
+        <button className="btn sm" onClick={testMail} disabled={testing}>
+          {testing ? "Sending..." : "Send test email"}
+        </button>
+      </div>
+
+      {loading && <div className="empty"><p>Loading...</p></div>}
+      {err && !loading && <div className="empty"><p>{err}</p></div>}
+
+      {email && !loading && (
+        <div className="card" style={{ padding: 18, marginBottom: 18 }}>
+          <h2 style={{ margin: "0 0 4px" }}>Email notifications</h2>
+          <p style={{ margin: "0 0 16px", color: "var(--text-dim)", fontSize: 13 }}>
+            Sent once at the end of a deployment. A timestamped backup is created before each save.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 20px" }}>
+            <label className="field" style={{ gridColumn: "1 / -1", flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={email.NotifEmail === true || email.NotifEmail === "true"}
+                onChange={e => setField("NotifEmail", e.target.checked)} style={{ width: "auto" }} />
+              <span>Enable email notifications</span>
+            </label>
+            <label className="field"><span>From (SMTP_FROM)</span>
+              <input type="text" value={email.SMTP_FROM || ""} onChange={e => setField("SMTP_FROM", e.target.value)} placeholder="deploy@corp.local" />
+            </label>
+            <label className="field"><span>To (SMTP_TO)</span>
+              <input type="text" value={email.SMTP_TO || ""} onChange={e => setField("SMTP_TO", e.target.value)} placeholder="a@corp.local, b@corp.local" />
+            </label>
+            <label className="field"><span>Server (SMTP_Server)</span>
+              <input type="text" value={email.SMTP_Server || ""} onChange={e => setField("SMTP_Server", e.target.value)} placeholder="smtp.corp.local" />
+            </label>
+            <label className="field"><span>Port (SMTP_Port)</span>
+              <input type="number" value={email.SMTP_Port ?? ""} onChange={e => setField("SMTP_Port", e.target.value)} placeholder="587" />
+            </label>
+            <label className="field"><span>Security (SMTP_SECURE)</span>
+              <select value={email.SMTP_SECURE || "TLS"} onChange={e => setField("SMTP_SECURE", e.target.value)}>
+                <option value="Plain">Plain (no encryption)</option>
+                <option value="TLS">TLS (STARTTLS, e.g. 587)</option>
+                <option value="SSL">SSL (direct, 465)</option>
+              </select>
+            </label>
+            <label className="field"><span>User (SMTP_USER)</span>
+              <input type="text" value={email.SMTP_USER || ""} onChange={e => setField("SMTP_USER", e.target.value)} placeholder="empty = no auth" />
+            </label>
+            <label className="field"><span>Password (SMTP_PASSWORD)</span>
+              <input type="password" value={email.SMTP_PASSWORD || ""} onChange={e => setField("SMTP_PASSWORD", e.target.value)} placeholder="empty = no auth" />
+            </label>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-dim)" }}>
+            Leave the password as <span className="mono">********</span> to keep the current one unchanged.
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <button className="btn primary" onClick={saveEmail} disabled={saving}>
+              {saving ? "Saving..." : "Save email settings"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cfg && !loading && (
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", fontWeight: 600, borderBottom: "1px solid var(--border)", color: "var(--text-dim)" }}>
+            Other settings (read-only)
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <tbody>
+              {Object.entries(cfg).filter(([k]) => !EMAIL_KEYS.includes(k)).map(([k, v]) => (
+                <tr key={k} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ padding: "10px 16px", fontWeight: 600, verticalAlign: "top", width: 220, whiteSpace: "nowrap" }}>{k}</td>
+                  <td style={{ padding: "10px 16px" }}>{renderVal(v)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PAGES = [
-  { id: "editor", label: "Editeur", comp: SequencesPage },
+  { id: "editor", label: "Editor", comp: SequencesPage },
   { id: "sequences", label: "Sequences", comp: SequenceListPage },
   { id: "catalogue", label: "Catalogue", comp: CataloguePage },
   { id: "scripts", label: "Scripts", comp: ScriptsPage },
   { id: "drivers", label: "Drivers", comp: DriversPage },
-  { id: "monitor", label: "Suivi", comp: MonitorPage },
-  { id: "stats", label: "Statistiques", comp: StatsPage },
+  { id: "monitor", label: "Monitoring", comp: MonitorPage },
+  { id: "stats", label: "Statistics", comp: StatsPage },
+  { id: "config", label: "Configuration", comp: ConfigPage },
 ]
 
 // Petites icones (emoji, sans dependance) pour les liens de pied de page.
