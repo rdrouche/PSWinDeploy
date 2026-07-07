@@ -1201,9 +1201,13 @@ try {
         Write-Host ""
 
         # VERROU anti-double-instance par FICHIER (le mutex Global\ est refuse en
-        # compte SYSTEM -> 'acces refuse'). Un fichier lock avec le PID + l'heure
-        # suffit : si un lock recent (<120s) existe et que son process tourne
-        # encore, cette instance se termine. Sinon on prend le lock.
+        # compte SYSTEM -> 'acces refuse'). Le lock stocke PID + heure. Regle : si
+        # le PROCESS du lock tourne encore, une autre instance est active -> on
+        # abandonne, quel que soit l'age du lock. (Auparavant un seuil de 120s
+        # faisait qu'un lock plus vieux que 2 min etait ignore MEME si le process
+        # tournait encore -- or un step long comme l'install d'applications depasse
+        # 2 min -> deux Start-Deploy tournaient en parallele et rebouclaient.)
+        # L'age ne sert plus qu'a purger un lock ORPHELIN (process mort) tres vieux.
         $lockFile = 'C:\Deploy\Logs\.resume-lock'
         $lockDir = Split-Path $lockFile -Parent
         if (-not (Test-Path $lockDir -EA SilentlyContinue)) { New-Item -ItemType Directory $lockDir -Force -EA SilentlyContinue | Out-Null }
@@ -1212,11 +1216,15 @@ try {
             try {
                 $lockData = Get-Content $lockFile -Raw -EA SilentlyContinue
                 $lockPid = ($lockData -split '\|')[0]
-                $lockTime = [datetime]($lockData -split '\|')[1]
-                $ageSec = ((Get-Date) - $lockTime).TotalSeconds
                 $stillRunning = $false
-                if ($lockPid) { $stillRunning = [bool](Get-Process -Id ([int]$lockPid) -EA SilentlyContinue) }
-                if ($ageSec -lt 120 -and $stillRunning) { $takeLock = $false }
+                if ($lockPid) {
+                    # Verifier que c'est bien un process powershell (le PID a pu
+                    # etre reattribue a un autre programme apres un reboot).
+                    $proc = Get-Process -Id ([int]$lockPid) -EA SilentlyContinue
+                    if ($proc -and $proc.ProcessName -match 'powershell|pwsh') { $stillRunning = $true }
+                }
+                # Un autre Start-Deploy tourne encore -> cette instance s'arrete.
+                if ($stillRunning -and "$lockPid" -ne "$PID") { $takeLock = $false }
             } catch { $takeLock = $true }
         }
         if (-not $takeLock) {
@@ -1355,6 +1363,14 @@ try {
             # Si le moteur a reboote, le process s'arrete avant ici. S'il revient,
             # c'est que la sequence est terminee (ou waiting d'action).
             if ($engResult -and $engResult.done) {
+                # DEPLOIEMENT AUTOMATIQUE TERMINE : afficher une popup bloquante de
+                # confirmation a l'operateur (utile surtout sans notification email).
+                # On l'affiche AVANT de basculer sur l'assistant : la session
+                # interactive (autologon) est encore active et les modules sont en
+                # memoire, donc la popup s'affiche correctement.
+                if (Get-Command Show-DeploymentDonePopup -EA SilentlyContinue) {
+                    Show-DeploymentDonePopup -ComputerName $env:COMPUTERNAME
+                }
                 # Sequence terminee : basculer sur l'assistant pour permettre le
                 # nettoyage / la fin (qui desarmera le mode deploiement).
                 $selfPath = $PSCommandPath
@@ -1373,13 +1389,16 @@ try {
         # active apres un deploiement termine.
         try {
             reg delete 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' /v 'PSWinDeployResume' /f 2>&1 | Out-Null
+            reg delete 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' /v 'PSWinDeploy-Resume' /f 2>&1 | Out-Null
             # Desarmer l'autologon
             $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
             Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue
             Remove-ItemProperty $wl -Name 'DefaultPassword' -Force -EA SilentlyContinue
             # Supprimer la tache de reprise (les deux noms possibles par securite)
             Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null
+            Unregister-ScheduledTask -TaskName 'PSWinDeploy-Resume' -Confirm:$false -EA SilentlyContinue | Out-Null
             schtasks /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null
+            schtasks /Delete /TN 'PSWinDeploy-Resume' /F 2>&1 | Out-Null
             # Centraliser via Disable-DeploymentMode si dispo (idempotent).
             if (Get-Command Disable-DeploymentMode -EA SilentlyContinue) { Disable-DeploymentMode }
         } catch {}

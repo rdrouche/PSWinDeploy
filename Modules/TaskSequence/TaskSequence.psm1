@@ -1610,7 +1610,7 @@ function Invoke-StepNotify {
     if ($successParam) { $ok = ("$successParam" -match '^(true|1|yes|on)$') }
 
     $drMod = Join-Path $PSScriptRoot '..\DeployReport\DeployReport.psm1'
-    if (Test-Path $drMod) { Import-Module $drMod -Force -EA SilentlyContinue }
+    if (Test-Path $drMod) { Import-Module $drMod -Force -Global -EA SilentlyContinue }
 
     if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
         $sent = Send-DeployDoneMail -Success $ok

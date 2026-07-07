@@ -213,25 +213,31 @@ function Invoke-PostInstallCleanup {
     <#
     .SYNOPSIS Nettoyage de fin depuis l'assistant : supprime les fichiers sensibles
         de C:\Deploy, conserve C:\Deploy\Logs. Equivalent du step 'Cleanup'.
+    .PARAMETER SkipMail  si present, n'envoie PAS la notification email (utile
+        quand l'appelant -- ex. step de sequence Notify -- l'a deja envoyee).
     #>
+    param([switch]$SkipMail)
+
     # -- Notification email de fin de deploiement (best-effort) --
     # L'email est envoye par le SERVEUR (via l'API), PAS par ce poste : on evite
     # d'ouvrir le SMTP sortant depuis tout le reseau de deploiement et le secret
     # SMTP reste sur le serveur. On envoie juste un signal a l'API. Ne bloque
     # jamais le nettoyage.
-    try {
-        $drMod = Join-Path $PSScriptRoot '..\DeployReport\DeployReport.psm1'
-        if (Test-Path $drMod) {
-            Import-Module $drMod -Force -EA SilentlyContinue
-            if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
-                # Notification simple : juste le nom de la machine. Pas de nom de
-                # sequence ici (pas toujours disponible dans ce contexte).
-                $ok = Send-DeployDoneMail -Success $true
-                if ($ok) { Write-PILog "End-of-deployment signal sent to the API (email handled server-side)." 'OK' }
-                else { Write-PILog "Could not reach the API for the end-of-deployment email (skipped)." 'INFO' }
-            } else { Write-PILog "DeployReport: Send-DeployDoneMail not available." 'WARN' }
-        } else { Write-PILog "DeployReport module not found at $drMod" 'WARN' }
-    } catch { Write-PILog "Deploy-done notification error: $_" 'WARN' }
+    if (-not $SkipMail) {
+        try {
+            $drMod = Join-Path $PSScriptRoot '..\DeployReport\DeployReport.psm1'
+            if (Test-Path $drMod) {
+                Import-Module $drMod -Force -Global -EA SilentlyContinue
+                if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
+                    # Notification simple : juste le nom de la machine. Pas de nom de
+                    # sequence ici (pas toujours disponible dans ce contexte).
+                    $ok = Send-DeployDoneMail -Success $true
+                    if ($ok) { Write-PILog "End-of-deployment signal sent to the API (email handled server-side)." 'OK' }
+                    else { Write-PILog "Could not reach the API for the end-of-deployment email (skipped)." 'INFO' }
+                } else { Write-PILog "DeployReport: Send-DeployDoneMail not available." 'WARN' }
+            } else { Write-PILog "DeployReport module not found at $drMod" 'WARN' }
+        } catch { Write-PILog "Deploy-done notification error: $_" 'WARN' }
+    }
 
     Write-PILog "End-of-deployment cleanup (C:\Deploy)..." 'STEP'
     $root = 'C:\Deploy'
@@ -546,5 +552,6 @@ Export-ModuleMember -Function @(
     'New-PostInstallSequenceFromTemplate',
     'Show-PostInstallWizard',
     'Select-TemplateSequence',
-    'Build-SequenceInteractive'
+    'Build-SequenceInteractive',
+    'Invoke-PostInstallCleanup'
 )

@@ -168,26 +168,42 @@ function Invoke-TaskReboot {
 # ===========================================================================
 function Invoke-TaskCleanup {
     param($Step, $Context)
-    $keepLogs = [bool](Get-StepParam $Step 'keepLogs' -Default $true)
-    $root = 'C:\Deploy'
-    if (-not (Test-Path $root)) { return New-TaskResult }
-    Write-TaskLog "End-of-deployment cleanup..." 'STEP' $Context $Step.id
+    try {
+        Write-TaskLog "End-of-deployment cleanup (delegating to shared routine)..." 'STEP' $Context $Step.id
 
-    # Le nettoyage des fichiers sensibles. Les dossiers Scripts/Modules contenant
-    # le script en cours peuvent etre verrouilles -> on tente, sans mentir.
-    $deleted = @(); $deferred = @()
-    foreach ($item in @('secrets.vault.psd1','secrets.vault','PSWinDeploy.psd1')) {
-        $p = Join-Path $root $item
-        if (Test-Path $p -EA SilentlyContinue) {
-            try { Remove-Item $p -Recurse -Force -EA Stop; $deleted += $item } catch { $deferred += $item }
+        # IMPORTANT : on delegue au MEME nettoyage que l'assistant manuel
+        # (Invoke-PostInstallCleanup), pour garantir un comportement IDENTIQUE
+        # entre le step de sequence et l'action manuelle. Cette fonction supprime
+        # les fichiers sensibles, les dossiers Runtime/Modules/Scripts (avec
+        # suppression differee au boot si verrouilles), le Reset du bureau, ET
+        # desarme la tache de reprise. -SkipMail : la notification a deja pu etre
+        # envoyee par un step 'Notify' -> on n'envoie pas un second email.
+        $piMod = Join-Path (Split-Path $PSScriptRoot -Parent) 'PostInstall\PostInstall.psm1'
+        if (Test-Path $piMod) { Import-Module $piMod -Force -Global -EA SilentlyContinue }
+
+        if (Get-Command Invoke-PostInstallCleanup -EA SilentlyContinue) {
+            Invoke-PostInstallCleanup -SkipMail
+            return New-TaskResult -Message 'cleanup: done (shared routine)'
         }
+
+        # Fallback : si la routine partagee n'est pas disponible, nettoyage minimal
+        # (fichiers sensibles + tache) pour ne pas laisser d'etat sensible.
+        Write-TaskLog "Invoke-PostInstallCleanup unavailable -- minimal fallback cleanup." 'WARN' $Context
+        $root = 'C:\Deploy'
+        try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue } catch {}
+        try { Unregister-ScheduledTask -TaskName 'PSWinDeploy-Resume' -Confirm:$false -EA SilentlyContinue } catch {}
+        foreach ($item in @('secrets.vault.psd1','secrets.vault','PSWinDeploy.psd1','state.psd1')) {
+            $p = Join-Path $root $item
+            if (Test-Path $p -EA SilentlyContinue) { try { Remove-Item $p -Recurse -Force -EA Stop } catch {} }
+        }
+        return New-TaskResult -Message 'cleanup: fallback'
     }
-    foreach ($mk in @('.domain-joined','.current-step','.updates-passes','.resume-lock')) {
-        try { Remove-Item (Join-Path $root "Logs\$mk") -Force -EA SilentlyContinue } catch {}
+    catch {
+        # Le nettoyage ne doit JAMAIS etre fatal : on logge et on renvoie un
+        # succes (le deploiement est deja termine fonctionnellement a ce stade).
+        Write-TaskLog "Cleanup: non-fatal error ignored: $_" 'WARN' $Context $Step.id
+        return New-TaskResult -Message "cleanup: erreur ignoree"
     }
-    foreach ($d in $deleted) { Write-TaskLog "  Supprime : $d" 'INFO' $Context }
-    if ($deferred.Count -gt 0) { Write-TaskLog "  Restants (a nettoyer au prochain boot) : $($deferred -join ', ')" 'WARN' $Context }
-    return New-TaskResult -Message "nettoye: $($deleted.Count)"
 }
 
 # ===========================================================================
@@ -220,8 +236,10 @@ function Invoke-TaskNotify {
     Write-TaskLog "Sending end-of-deployment notification (server-side email)..." 'STEP' $Context $Step.id
 
     # Charger le module DeployReport (client leger) qui sait joindre l'API.
+    # -Global : sinon l'import reste local a ce handler et masque/casse la
+    # visibilite de Send-DeployReport pour le moteur (TaskEngine) au step suivant.
     $drMod = Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployReport\DeployReport.psm1'
-    if (Test-Path $drMod) { Import-Module $drMod -Force -EA SilentlyContinue }
+    if (Test-Path $drMod) { Import-Module $drMod -Force -Global -EA SilentlyContinue }
 
     if (Get-Command Send-DeployDoneMail -EA SilentlyContinue) {
         $sent = Send-DeployDoneMail -Success $ok

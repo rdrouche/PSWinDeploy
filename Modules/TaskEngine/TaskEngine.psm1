@@ -20,6 +20,29 @@ if (-not (Get-Command Send-DeployReport -EA SilentlyContinue)) {
     if (Test-Path $drMod) { Import-Module $drMod -Force -Global -EA SilentlyContinue }
 }
 
+# Wrapper SUR pour l'envoi de heartbeat : garantit que Send-DeployReport est
+# disponible avant chaque appel. Un handler de step peut avoir (re)importe le
+# module DeployReport dans un scope local (Import-Module sans -Global), ce qui
+# rend Send-DeployReport invisible ensuite dans ce module -> l'appel direct
+# levait "terme non reconnu" et faisait ECHOUER le deploiement au step suivant
+# (typiquement Cleanup). Ce wrapper recharge le module au besoin, en -Global, et
+# n'echoue jamais (best-effort : un heartbeat rate ne doit pas casser le deploiement).
+function Send-Heartbeat {
+    param([string]$Status = 'running', [string]$Step = '', [int]$Percent = 0, [string]$Message = '')
+    try {
+        if (-not (Get-Command Send-DeployReport -EA SilentlyContinue)) {
+            $drMod = Join-Path (Split-Path $PSScriptRoot -Parent) 'DeployReport\DeployReport.psm1'
+            if (Test-Path $drMod) { Import-Module $drMod -Force -Global -EA SilentlyContinue }
+        }
+        if (Get-Command Send-DeployReport -EA SilentlyContinue) {
+            Send-DeployReport -Status $Status -Step $Step -Percent $Percent -Message $Message
+        }
+    } catch {
+        # Un heartbeat ne doit JAMAIS etre fatal.
+        Write-EngineLog "Heartbeat '$Status' ignore (non-fatal): $_" 'WARN' $Step
+    }
+}
+
 Set-StrictMode -Version Latest
 
 # --- Etat / chemins standard de la phase 2 ---
@@ -116,6 +139,36 @@ function Enable-DeploymentMode {
 
     # 3) Script de secours sur le disque + Bureau
     Write-DeployResetScript
+}
+
+function Show-DeploymentDonePopup {
+    <#
+    .SYNOPSIS Affiche une popup BLOQUANTE "Deployment complete" en fin de
+        deploiement automatique (sequence sans intervention). Sert de
+        confirmation visuelle a l'operateur, surtout en l'absence de notification
+        email. N'echoue jamais (best-effort : si l'UI n'est pas dispo, on log).
+    .PARAMETER ComputerName  nom de la machine a afficher (defaut : locale).
+    #>
+    param([string]$ComputerName = $env:COMPUTERNAME)
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+        $title = 'PSWinDeploy'
+        $text  = "Deployment complete.`r`n`r`nComputer: $ComputerName`r`n`r`nThe machine is ready. Click OK to finish."
+        # MessageBox bloquante, icone d'information, toujours au premier plan.
+        [System.Windows.Forms.MessageBox]::Show(
+            $text, $title,
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button1,
+            [System.Windows.Forms.MessageBoxOptions]::DefaultDesktopOnly
+        ) | Out-Null
+        Write-EngineLog "Deployment-complete popup acknowledged by operator." 'INFO'
+    } catch {
+        # Pas d'UI disponible (ex. SYSTEM sans session interactive) -> on ne
+        # bloque pas, on trace seulement.
+        Write-EngineLog "Deployment-complete popup could not be shown: $_" 'WARN'
+    }
 }
 
 function Disable-DeploymentMode {
@@ -267,6 +320,9 @@ function Invoke-Engine {
         [string]$PhaseFilter = 'Windows'
     )
     if (-not $Context) { $Context = @{} }
+    # Etat local : le heartbeat 'done' a-t-il deja ete envoye (evite un double
+    # envoi quand il est emis avant un step Cleanup, puis en fin de sequence).
+    $script:DoneReported = $false
     # Acces hashtable SUR en StrictMode : tester ContainsKey avant d'acceder.
     if (-not $Context.ContainsKey('LogsDir') -or -not $Context['LogsDir']) { $Context['LogsDir'] = $script:EngineLogs }
     if (-not $Context.ContainsKey('Log')    -or -not $Context['Log'])    { $Context['Log'] = { param($m,$l,$s) Write-EngineLog $m $l $s } }
@@ -322,10 +378,26 @@ function Invoke-Engine {
         } catch {}
         Write-EngineLog "[DEBUT] Step '$stepName'" 'STEP' $stepId
 
+        # CAS SPECIAL -- step de nettoyage final (Cleanup) : ce step detruit une
+        # partie de l'environnement (PSWinDeploy.psd1, fichiers de suivi...). Or
+        # le heartbeat de fin ('done') a besoin de cet environnement (api-url.txt,
+        # etc.). On envoie donc 'done' MAINTENANT, tant que tout est intact, PUIS
+        # on execute le cleanup. Cela evite l'erreur fatale "environnement detruit
+        # avant l'envoi du heartbeat" (reproductible en by-name/by-mac, sequence
+        # copiee en local). On memorise l'envoi pour ne pas le refaire en fin de
+        # boucle.
+        $stepTypeNow = "$(Get-StepProperty $step 'type')"
+        if (-not $stepTypeNow) { $stepTypeNow = "$(Get-StepProperty $step 'Type')" }
+        if ($stepTypeNow -eq 'Cleanup' -and -not $script:DoneReported) {
+            Send-Heartbeat -Status 'done' -Percent 100 -Message "Deployment complete: $($sequence.Name)"
+            $script:DoneReported = $true
+            Write-EngineLog "Final 'done' heartbeat sent before cleanup (environment still intact)." 'INFO' $stepId
+        }
+
         # Heartbeat vers l'API (suivi temps reel dans le web). Pourcentage =
         # progression dans la liste des steps.
         $pct = if ($stepsToRun.Count -gt 0) { [int](($idx / $stepsToRun.Count) * 100) } else { 0 }
-        Send-DeployReport -Status 'running' -Step $stepId -Percent $pct -Message $stepName
+        Send-Heartbeat -Status 'running' -Step $stepId -Percent $pct -Message $stepName
 
         # APPEL DU HANDLER (dispatch) -> contrat standard
         $result = Invoke-StepHandler -Step $step -Context $Context
@@ -370,7 +442,7 @@ function Invoke-Engine {
             Write-EngineLog "Reboot #$rebootCount -- reprise prevue au step '$nextId'" 'WARN'
             # L'autologon + la tache de reprise sont DEJA armes (deployment mode
             # active au demarrage). On reboote simplement.
-            Send-DeployReport -Status 'rebooting' -Step $nextId -Message "Reboot avant $nextId"
+            Send-Heartbeat -Status 'rebooting' -Step $nextId -Message "Reboot avant $nextId"
             Write-EngineLog "=== REBOOT in 5 seconds ===" 'WARN'
             Start-Sleep -Seconds 5
             Restart-Computer -Force
@@ -383,7 +455,11 @@ function Invoke-Engine {
     foreach ($mk in @('.current-step', '.updates-passes')) {
         try { Remove-Item (Join-Path $Context.LogsDir $mk) -Force -EA SilentlyContinue } catch {}
     }
-    Send-DeployReport -Status 'done' -Percent 100 -Message "Deployment complete: $($sequence.Name)"
+    # 'done' deja envoye avant un eventuel step Cleanup -> ne pas le renvoyer.
+    if (-not $script:DoneReported) {
+        Send-Heartbeat -Status 'done' -Percent 100 -Message "Deployment complete: $($sequence.Name)"
+        $script:DoneReported = $true
+    }
     Write-EngineLog "==============================================" 'SUCCESS'
     Write-EngineLog "  DEPLOIEMENT TERMINE : '$($sequence.Name)'" 'SUCCESS'
     Write-EngineLog "==============================================" 'SUCCESS'
@@ -400,6 +476,7 @@ Export-ModuleMember -Function @(
     'Get-LocalAdminName'
     'Enable-DeploymentMode'
     'Disable-DeploymentMode'
+    'Show-DeploymentDonePopup'
     'Test-DeploymentMode'
     'Write-DeployResetScript'
 )
