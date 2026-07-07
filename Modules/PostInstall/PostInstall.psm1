@@ -242,7 +242,25 @@ function Invoke-PostInstallCleanup {
     Write-PILog "End-of-deployment cleanup (C:\Deploy)..." 'STEP'
     $root = 'C:\Deploy'
     if (-not (Test-Path $root)) { return }
+
+    # DESARMER LE MODE DEPLOIEMENT : tache de reprise + autologon + RunOnce.
+    # Auparavant seule la tache etait supprimee ici -> l'autologon restait actif
+    # apres le deploiement (la machine reouvrait la session admin toute seule).
+    # On desarme donc explicitement les DEUX, avec les deux noms possibles.
     try { Unregister-ScheduledTask -TaskName 'PSWinDeployResume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
+    try { Unregister-ScheduledTask -TaskName 'PSWinDeploy-Resume' -Confirm:$false -EA SilentlyContinue | Out-Null } catch {}
+    try { schtasks /Delete /TN 'PSWinDeployResume' /F 2>&1 | Out-Null } catch {}
+    try { schtasks /Delete /TN 'PSWinDeploy-Resume' /F 2>&1 | Out-Null } catch {}
+    try {
+        $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty $wl -Name 'AutoAdminLogon' -Value '0' -Type String -Force -EA SilentlyContinue
+        Remove-ItemProperty $wl -Name 'DefaultPassword'  -Force -EA SilentlyContinue
+        Remove-ItemProperty $wl -Name 'AutoLogonCount'   -Force -EA SilentlyContinue
+        Remove-ItemProperty $wl -Name 'DefaultUserName'  -Force -EA SilentlyContinue
+        Write-PILog "  Autologon disarmed (AutoAdminLogon=0)." 'INFO'
+    } catch { Write-PILog "  Could not disarm autologon: $_" 'WARN' }
+    try { Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'PSWinDeployResume'  -Force -EA SilentlyContinue } catch {}
+    try { Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'PSWinDeploy-Resume' -Force -EA SilentlyContinue } catch {}
 
     # Retirer le script de secours du BUREAU (il ne doit pas trainer sur le
     # bureau une fois le deploiement termine). On le laisse dans C:\Deploy tant
